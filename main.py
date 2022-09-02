@@ -1,6 +1,5 @@
 import argparse
-import extract_mimic
-import extract_eicu
+import * from extract_database
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Parse to query MIMIC/eICU data")
@@ -12,6 +11,8 @@ if __name__ == '__main__':
                         help='Where to stop the pipeline')
     parser.add_argument("--patient_group", type=str, default='None', choices=['None', 'sepsis-3'],
                         help='Specific groups to extract')
+    parser.add_argument("--project_id", type=str, default='lucid-inquiry-337016',
+                        help = 'Specify the Bigquery billing project')
     args = parser.parse_args()
     if args.database == 'MIMIC':
         extract_mimic(args)
