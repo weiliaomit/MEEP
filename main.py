@@ -1,5 +1,5 @@
 import argparse
-import * from extract_database
+from extract_database import *
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Parse to query MIMIC/eICU data")

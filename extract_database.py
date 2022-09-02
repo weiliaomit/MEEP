@@ -5,9 +5,7 @@ auth.authenticate_user()
 # from google.colab import drive
 # drive.mount('/content/drive')
 import os
-import * from utils_mimic
-
-
+from utils_mimic import *
 
 def extract_mimic(args):
 
