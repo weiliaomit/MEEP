@@ -3,14 +3,21 @@ import numpy as np
 '''
 Some Util funcs adapted from MIMIC-Extract:
 https://github.com/MLforHealth/MIMIC_Extract
-Shirly Wang, Matthew B. A. McDermott, Geeticka Chauhan, Michael C. Hughes, Tristan Naumann, 
-and Marzyeh Ghassemi. MIMIC-Extract: A Data Extraction, Preprocessing, and Representation 
+Wang et al.. MIMIC-Extract: A Data Extraction, Preprocessing, and Representation 
 Pipeline for MIMIC-III. arXiv:1907.08322. 
 '''
 to_hours = lambda x: max(0, x.days * 24 + x.seconds // 3600)
+ID_COLS = ['subject_id', 'hadm_id', 'stay_id']
+ITEM_COLS = ['itemid', 'label', 'LEVEL1', 'LEVEL2']
 
 
 def combine_cols(col_1, col_2):
+    """
+    Combine columns from different itemids but same measurement
+    :param col_1: columns to be removed after merging
+    :param col_2: columns to be kept after merging
+    :return: col_2:
+    """
     col_2.columns.names = ['LEVEL2', 'Aggregation Function']
     col_1 = col_1.droplevel(level=0, axis=1)
     col_2 = col_2.droplevel(level=0, axis=1)
@@ -37,8 +44,15 @@ def combine_cols(col_1, col_2):
     # or_mean, or_filled, c_mean, c_filled))
     return col_2
 
-
 def range_unnest(df, col, out_col_name=None, reset_index=False):
+    """
+    Create multiple rows for a stay based on max stay hours
+    :param df: pd.DataFrame, a dataframe contains basic patient demographics, shape e.g. (38766, 20)
+    :param col: str, column name to be unfolded, e.g. 'max_hours'
+    :param out_col_name: str, e.g. 'hours_in'
+    :param reset_index: bool, whether set index or not
+    :return: col_flat, pd.DataFrame, create rows for each stay_id based on 'max_hours', shape e.g.  (2697900, 2)
+    """
     assert len(df.index.names) == 1, "Does not support multi-index."
     if out_col_name is None:
         out_col_name = col
@@ -52,39 +66,54 @@ def range_unnest(df, col, out_col_name=None, reset_index=False):
         col_flat = col_flat.set_index(df.index.names[0])
     return col_flat
 
-
 def process_query_results(df, fill_df):
+    """
+    :param df: pd.DataFrame, results after query, shape e.g. (237081, 27)
+    :param fill_df: pd.DataFrame, a multiindex template, indices: subject_id hadm_id stay_id hours_in,
+                    shape e.g. (2697900, 1)
+    :return: df: pd.DataFrame, dataframe after filling query results into the template and
+                apply aggregation function, shape e.g. (2697900, 44), with row index same as fill_df
+                but column becomes a multiindex, e.g. level 0: so2, level 1: mean, count
+    """
     df = df.groupby(ID_COLS + ['hours_in']).agg(['mean', 'count'])
     df.index = df.index.set_levels(df.index.levels[1].astype(int), level=1)
     df = df.reindex(fill_df.index)
     return df
 
-
-ID_COLS = ['subject_id', 'hadm_id', 'stay_id']
-ITEM_COLS = ['itemid', 'label', 'LEVEL1', 'LEVEL2']
-
-
-def compile_intervention(df_copy, c):
+def compile_intervention(inv_query, c):
+    """
+    Organize queried intervention table
+    :param inv_query: pd.DataFrame, Queried intervention results, shape e.g.  (54257, 8)
+                    columns, e.g. subject_id, hadm_id, stay_id, starttime, endtime, icu_intime, icu_outtime, max_hours
+    :param c: str, column name of the intervention procedure, e.g. 'vent'
+    :return: inv_query: pd.DataFrame, after organizing, the last column will indicate a state at that hour (0 or 1)
+                    columns, e.g. stay_id, subject_id, hadm_id, hours_in, vent, shape e.g. (2290028, 5)
+    """
     # df_copy = df.copy(deep=True)
-    df_copy['max_hours'] = (df_copy['icu_outtime'] - df_copy['icu_intime']).apply(to_hours)
-    df_copy.loc[:, 'starttime'] = df_copy.loc[:, ['starttime', 'icu_intime']].max(axis=1)
-    df_copy.loc[:, 'endtime'] = df_copy.loc[:, ['endtime', 'icu_outtime']].min(axis=1)
-    df_copy['starttime'] = df_copy['starttime'] - df_copy['icu_intime']
-    df_copy['starttime'] = df_copy.starttime.apply(lambda x: x.days * 24 + x.seconds // 3600)
-    df_copy['endtime'] = df_copy['endtime'] - df_copy['icu_intime']
-    df_copy['endtime'] = df_copy.endtime.apply(lambda x: x.days * 24 + x.seconds // 3600)
+    inv_query['max_hours'] = (inv_query['icu_outtime'] - inv_query['icu_intime']).apply(to_hours)
+    inv_query.loc[:, 'starttime'] = inv_query.loc[:, ['starttime', 'icu_intime']].max(axis=1)
+    inv_query.loc[:, 'endtime'] = inv_query.loc[:, ['endtime', 'icu_outtime']].min(axis=1)
+    inv_query['starttime'] = inv_query['starttime'] - inv_query['icu_intime']
+    inv_query['starttime'] = inv_query.starttime.apply(lambda x: x.days * 24 + x.seconds // 3600)
+    inv_query['endtime'] = inv_query['endtime'] - inv_query['icu_intime']
+    inv_query['endtime'] = inv_query.endtime.apply(lambda x: x.days * 24 + x.seconds // 3600)
     if c == 'antibiotics':
-        df_copy = df_copy.groupby('stay_id').apply(add_antibitics_indicators)
+        inv_query = inv_query.groupby('stay_id').apply(add_antibitics_indicators)
     else:
-        df_copy = df_copy.groupby('stay_id').apply(add_outcome_indicators)
+        inv_query = inv_query.groupby('stay_id').apply(add_outcome_indicators)
 
-    df_copy.rename(columns={'on': c}, inplace=True)
+    inv_query.rename(columns={'on': c}, inplace=True)
     # heparin_2.rename(columns={'values': c + ' conc'}, inplace=True)
-    df_copy = df_copy.reset_index(level='stay_id')
-    return df_copy
-
+    inv_query = inv_query.reset_index(level='stay_id')
+    return inv_query
 
 def add_outcome_indicators(out_gb):
+    """
+    Iterate a groupby object and add intervention procedure indicator
+    :param out_gb: Pandas groupby object, specific intervention variable grouped by e.g. 'stay_id'
+    :return: pd.DataFrame, for each stay_id, iterate through the hours with the procedure, represent it by 1
+                for any other hours, fill 0, shape e.g. (2290028, 5)
+    """
     subject_id = out_gb['subject_id'].unique()[0]
     hadm_id = out_gb['hadm_id'].unique()[0]
     # icustay_id = out_gb['stay_id'].unique()[0]
@@ -108,8 +137,13 @@ def add_outcome_indicators(out_gb):
     return pd.DataFrame({'subject_id': subject_id, 'hadm_id': hadm_id,
                          'hours_in': hours, 'on': on_vals})  # icustay_id': icustay_id})
 
-
 def add_antibitics_indicators(out_gb):
+    """
+    Iterate a groupby object and add intervention procedure indicator --- antibiotics version
+    :param out_gb: Pandas groupby object, specific intervention variable grouped by e.g. 'stay_id'
+    :return: pd.DataFrame, for each stay_id, iterate through the hours with the antibitics name and route
+            shape e.g. (1964815, 6), column names: stay_id, subject_id, hadm_id, hours_in, antibiotic, route
+    """
     subject_id = out_gb['subject_id'].unique()[0]
     hadm_id = out_gb['hadm_id'].unique()[0]
     # icustay_id = out_gb['stay_id'].unique()[0]
@@ -139,6 +173,12 @@ def add_antibitics_indicators(out_gb):
 
 
 def add_blank_indicators(out_gb):
+    """
+    Function to add blank indicator for stays with no ventilation records
+    :param out_gb: Pandas groupby object, grouped from a dataframe
+    :return: pd.DataFrame, shape e.g. (407872, 4), index: stay_id, column names: subject_id, hadm_id, hours_in, on
+            with on being all 0s
+    """
     subject_id = out_gb['subject_id'].unique()[0]
     hadm_id = out_gb['hadm_id'].unique()[0]
     # icustay_id = out_gb['icustay_id'].unique()[0]
@@ -151,20 +191,13 @@ def add_blank_indicators(out_gb):
 
 
 def continuous_outcome_processing(out_data, data, icustay_timediff):
-    """
-    Args
-    ----
-    out_data : pd.DataFrame
-        index=None
-        Contains subset of icustay_id corresp to specific sessions where outcome observed.
-    data : pd.DataFrame
-        index=icustay_id
-        Contains full population of static demographic data
-    icustay_timediff:
-    Returns
-    -------
-    out_data : pd.DataFrame
-    """
+    '''
+
+    :param out_data:
+    :param data:
+    :param icustay_timediff:
+    :return:
+    '''
     out_data['icu_intime'] = out_data['stay_id'].map(data['icu_intime'].to_dict())
     out_data['icu_outtime'] = out_data['stay_id'].map(data['icu_outtime'].to_dict())
     out_data['max_hours'] = out_data['stay_id'].map(icustay_timediff)
