@@ -3,8 +3,7 @@ from google.colab import auth
 from google.cloud import bigquery
 
 auth.authenticate_user()
-# from google.colab import drive
-# drive.mount('/content/drive')
+
 import os
 import numpy as np
 import pandas as pd
@@ -24,6 +23,7 @@ def extract_mimic(args):
     ID_COLS = ['subject_id', 'hadm_id', 'stay_id']
     ITEM_COLS = ['itemid', 'label', 'LEVEL1', 'LEVEL2']
 
+    # datatime format to hour
     to_hours = lambda x: max(0, x.days * 24 + x.seconds // 3600)
 
     # define our patient cohort by age, icu stay time
@@ -78,7 +78,7 @@ def extract_mimic(args):
     icuids_to_keep = set([str(s) for s in icuids_to_keep])
     subject_to_keep = patient['subject_id']
     subject_to_keep = set([str(s) for s in subject_to_keep])
-    # create template fill_df
+    # create template fill_df with time window for each stay based on icu in/out time
     patient.set_index('stay_id', inplace=True)
     patient['max_hours'] = (patient['icu_outtime'] - patient['icu_intime']).apply(to_hours)
     missing_hours_fill = range_unnest(patient, 'max_hours', out_col_name='hours_in', reset_index=True)
@@ -113,7 +113,7 @@ def extract_mimic(args):
     """.format(icuids=','.join(icuids_to_keep))
     vitalsign = gcp2df(query)
 
-    # temparature is a repeat name
+    # temperature/glucose is a repeat name but different itemid, rename for now and combine later
     vitalsign.rename(columns={'temperature': 'temp_vital'}, inplace=True)
     vitalsign.rename(columns={'glucose': 'glucose_vital'}, inplace=True)
     vitalsign['hours_in'] = (vitalsign['charttime'] - vitalsign['icu_intime']).apply(to_hours)
@@ -135,7 +135,7 @@ def extract_mimic(args):
     blood_diff.drop(columns=['charttime', 'icu_intime', 'specimen_id'], inplace=True)
     blood_diff = process_query_results(blood_diff, fill_df)
 
-    # query cadiac marker
+    # query cardiac marker
     query = """
     SELECT b.*, i.stay_id, i.icu_intime
     FROM physionet-data.mimic_derived.cardiac_marker b
@@ -163,7 +163,7 @@ def extract_mimic(args):
     """.format(icuids=','.join(subject_to_keep))
     chemistry = gcp2df(query)
 
-    # rename glucose into glucose_chem
+    # rename glucose into glucose_chem and others
     chemistry.rename(columns={'glucose': 'glucose_chem'}, inplace=True)
     chemistry.rename(columns={'bicarbonate': 'bicarbonate_chem'}, inplace=True)
     chemistry.rename(columns={'chloride': 'chloride_chem'}, inplace=True)
@@ -287,7 +287,7 @@ def extract_mimic(args):
     uo = process_query_results(uo, fill_df)
 
     # join and save
-    # use MIMIC-Extract way to query other itemids
+    # use MIMIC-Extract way to query other itemids that was present in MIMIC-Extract
     # load resources
     chartitems_to_keep = pd.read_excel('/resources/chartitems_to_keep_0505.xlsx')
     lab_to_keep = pd.read_excel('/resources/labitems_to_keep_0505.xlsx')
@@ -345,6 +345,7 @@ def extract_mimic(args):
     total = bg.join(
         [vitalsign, blood_diff, cardiac_marker, chemistry, coagulation, cbc, culture, enzyme, gcs, inflammation, uo])
 
+    # drop some columns (not well-populated or dependent on existing columns )
     columns_to_drop = ['rdwsd', 'aado2', 'pao2fio2ratio', 'carboxyhemoglobin',
                        'methemoglobin', 'globulin', 'd_dimer', 'thrombin', 'basophils_abs', 'eosinophils_abs',
                        'lymphocytes_abs', 'monocytes_abs', 'neutrophils_abs']
@@ -354,6 +355,7 @@ def extract_mimic(args):
     chart_lab.loc[:, idx[:, ['count']]] = chart_lab.loc[:, idx[:, ['count']]].fillna(0)
     total.loc[:, idx[:, ['count']]] = total.loc[:, idx[:, ['count']]].fillna(0)
 
+    # combine columns since they were from different itemids
     names_to_combine = [
         ['so2', 'spo2'], ['fio2', 'fio2_chartevents'], ['bicarbonate', 'bicarbonate_chem'],
         ['hematocrit', 'hematocrit_cbc'], ['hemoglobin', 'hemoglobin_cbc'], ['chloride', 'chloride_chem'],
@@ -402,7 +404,7 @@ def extract_mimic(args):
 
     # drop Eosinophils
     chart_lab.drop('Eosinophils', axis=1, level=0, inplace=True)
-
+    # combine in chart_lab table
     names = ['Phosphate', 'Phosphorous']
     original = chart_lab.loc[:, idx[names[0], ['mean', 'count']]].copy(deep=True)
     makeups = chart_lab.loc[:, idx[names[1], ['mean', 'count']]].copy(deep=True)
@@ -421,7 +423,7 @@ def extract_mimic(args):
     # ['aniongap', 'Anion gap'], ['ast', 'Asparate aminotransferase'], ['bicarbonate', 'Bicarbonate'], \
     # ['bilirubin_total', 'Bilirubin'], ['bilirubin_direct','Bilirubin_direct'], ['calcium', 'Calcium ionized'],\
     # ['chloride', 'Chloride'], ['creatinine', 'Creatinine'], ['dbp', 'Diastolic blood pressure'], ['dbp_ni', 'Diastolic blood pressure'],\
-
+    # Combine between chartlab and total table
     names_list = [
         ['alt', 'Alanine aminotransferase'], ['albumin', 'Albumin'], ['alp', 'Alkaline phosphate'], \
         ['aniongap', 'Anion gap'], ['ast', 'Asparate aminotransferase'], ['bicarbonate', 'Bicarbonate'], \
@@ -441,7 +443,7 @@ def extract_mimic(args):
         total.loc[:, idx[names[0], ['mean', 'count']]] = filled.loc[:, ['mean', 'count']].values
         chart_lab.drop(names[1], axis=1, level=0, inplace=True)
 
-    # in eicu mbp contains both invasive and non-invasive
+    # In eicu mbp contains both invasive and non-invasive, so combine them
     names_list = [['dbp', 'Diastolic blood pressure'], ['dbp_ni', 'Diastolic blood pressure'], \
                   ['mbp', 'Mean blood pressure'], ['mbp_ni', 'Mean blood pressure'], \
                   ['sbp', 'Systolic blood pressure'], ['sbp_ni', 'Systolic blood pressure']]
@@ -650,7 +652,7 @@ def extract_mimic(args):
         how='left'
     )
 
-    # transfusion
+    # platelets transfusion
     query = \
         """
         WITH pll as (
@@ -686,7 +688,7 @@ def extract_mimic(args):
         how='left'
     )
 
-    # transfusion
+    # ffp transfusion
     query = \
         """
         WITH ffp as (
@@ -888,7 +890,7 @@ def extract_mimic(args):
     vital_final.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_vital.h5'), key='mimic_vital')
     static.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_static.h5'), key='mimic_static')
     intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_inv.h5'), key='mimic_inv')
-    return
+    return 
 
 
 def extract_eicu(args):

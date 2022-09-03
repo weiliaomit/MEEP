@@ -12,13 +12,12 @@ if __name__ == '__main__':
     parser.add_argument("--patient_group", type=str, default='None', choices=['None', 'sepsis-3'],
                         help='Specific groups to extract')
     parser.add_argument("--project_id", type=str, default='lucid-inquiry-337016',
-                        help = 'Specify the Bigquery billing project')
+                        help='Specify the Bigquery billing project')
     parser.add_argument("--output_dir", type=str, default='/content/output')
     args = parser.parse_args()
     if args.database == 'MIMIC':
         extract_mimic(args)
     elif args.database == 'eICU':
         extract_eicu(args)
-
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
