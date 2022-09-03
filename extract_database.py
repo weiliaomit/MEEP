@@ -352,6 +352,7 @@ def extract_mimic(args):
     for c in columns_to_drop:
         total.drop(c, axis=1, level=0, inplace=True)
 
+    idx = pd.IndexSlice
     chart_lab.loc[:, idx[:, ['count']]] = chart_lab.loc[:, idx[:, ['count']]].fillna(0)
     total.loc[:, idx[:, ['count']]] = total.loc[:, idx[:, ['count']]].fillna(0)
 
@@ -362,7 +363,6 @@ def extract_mimic(args):
         ['glucose', 'glucose_chem'], ['glucose', 'glucose_vital'],
         ['temperature', 'temp_vital'], ['sodium', 'sodium_chem'], ['potassium', 'potassium_chem']
     ]
-    idx = pd.IndexSlice
     for names in names_to_combine:
         original = total.loc[:, idx[names[0], ['mean', 'count']]].copy(deep=True)
         makeups = total.loc[:, idx[names[1], ['mean', 'count']]].copy(deep=True)
