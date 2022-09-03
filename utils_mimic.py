@@ -1,6 +1,6 @@
 import pandas as pd
 '''
-Util funcs adapted from MIMIC-Extract:
+Some Util funcs adapted from MIMIC-Extract:
 https://github.com/MLforHealth/MIMIC_Extract
 Shirly Wang, Matthew B. A. McDermott, Geeticka Chauhan, Michael C. Hughes, Tristan Naumann, 
 and Marzyeh Ghassemi. MIMIC-Extract: A Data Extraction, Preprocessing, and Representation 

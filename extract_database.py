@@ -289,9 +289,9 @@ def extract_mimic(args):
     # join and save
     # use MIMIC-Extract way to query other itemids that was present in MIMIC-Extract
     # load resources
-    chartitems_to_keep = pd.read_excel('/resources/chartitems_to_keep_0505.xlsx')
-    lab_to_keep = pd.read_excel('/resources/labitems_to_keep_0505.xlsx')
-    var_map = pd.read_csv('/resources/Chart_makeup_0505 - var_map0505.csv')
+    chartitems_to_keep = pd.read_excel('./resources/chartitems_to_keep_0505.xlsx')
+    lab_to_keep = pd.read_excel('./resources/labitems_to_keep_0505.xlsx')
+    var_map = pd.read_csv('./resources/Chart_makeup_0505 - var_map0505.csv')
     chart_items = chartitems_to_keep['chartitems_to_keep'].tolist()
     lab_items = lab_to_keep['labitems_to_keep'].tolist()
     chart_items = set([str(i) for i in chart_items])
@@ -890,7 +890,7 @@ def extract_mimic(args):
     vital_final.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_vital.h5'), key='mimic_vital')
     static.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_static.h5'), key='mimic_static')
     intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_inv.h5'), key='mimic_inv')
-    return 
+    return
 
 
 def extract_eicu(args):
