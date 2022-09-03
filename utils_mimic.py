@@ -6,7 +6,7 @@ Shirly Wang, Matthew B. A. McDermott, Geeticka Chauhan, Michael C. Hughes, Trist
 and Marzyeh Ghassemi. MIMIC-Extract: A Data Extraction, Preprocessing, and Representation 
 Pipeline for MIMIC-III. arXiv:1907.08322. 
 '''
-
+to_hours = lambda x: max(0, x.days * 24 + x.seconds // 3600)
 def combine_cols(a, b):
     b.columns.names = ['LEVEL2', 'Aggregation Function']
     a = a.droplevel(level=0, axis=1)
