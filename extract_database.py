@@ -1,13 +1,11 @@
 # Set up Google big query
 from google.colab import auth
 from google.cloud import bigquery
-
-auth.authenticate_user()
-
 import os
 import numpy as np
 import pandas as pd
 from utils_mimic import *
+auth.authenticate_user()
 
 
 def extract_mimic(args):
@@ -15,11 +13,11 @@ def extract_mimic(args):
     client = bigquery.Client(project=args.project_id)
 
     def gcp2df(sql, job_config=None):
-        query = client.query(sql, job_config)
-        results = query.result()
+        que = client.query(sql, job_config)
+        results = que.result()
         return results.to_dataframe()
 
-    level_to_change = 1
+    # level_to_change = 1
     ID_COLS = ['subject_id', 'hadm_id', 'stay_id']
     ITEM_COLS = ['itemid', 'label', 'LEVEL1', 'LEVEL2']
 
@@ -210,7 +208,8 @@ def extract_mimic(args):
 
     # query culture
     query = """
-    SELECT b.subject_id, b.charttime, b.specimen, b.screen, b.positive_culture, b.has_sensitivity, i.hadm_id, i.stay_id, i.icu_intime
+    SELECT b.subject_id, b.charttime, b.specimen, b.screen, b.positive_culture, b.has_sensitivity, 
+    i.hadm_id, i.stay_id, i.icu_intime
     FROM physionet-data.mimic_derived.culture b
     INNER JOIN physionet-data.mimic_derived.icustay_detail i ON i.subject_id = b.subject_id
     where b.subject_id in ({icuids})
@@ -419,21 +418,17 @@ def extract_mimic(args):
     chart_lab.loc[:, idx[names[0], ['mean', 'count']]] = filled.loc[:, ['mean', 'count']].values
     chart_lab.drop(names[1], axis=1, level=0, inplace=True)
 
-    # ['alt', 'Alanine aminotransferase'], ['albumin','Albumin'], ['alp', 'Alkaline phosphate'],\
-    # ['aniongap', 'Anion gap'], ['ast', 'Asparate aminotransferase'], ['bicarbonate', 'Bicarbonate'], \
-    # ['bilirubin_total', 'Bilirubin'], ['bilirubin_direct','Bilirubin_direct'], ['calcium', 'Calcium ionized'],\
-    # ['chloride', 'Chloride'], ['creatinine', 'Creatinine'], ['dbp', 'Diastolic blood pressure'], ['dbp_ni', 'Diastolic blood pressure'],\
     # Combine between chartlab and total table
     names_list = [
-        ['alt', 'Alanine aminotransferase'], ['albumin', 'Albumin'], ['alp', 'Alkaline phosphate'], \
-        ['aniongap', 'Anion gap'], ['ast', 'Asparate aminotransferase'], ['bicarbonate', 'Bicarbonate'], \
-        ['bilirubin_total', 'Bilirubin'], ['bilirubin_direct', 'Bilirubin_direct'], ['calcium', 'Calcium ionized'], \
-        ['chloride', 'Chloride'], ['creatinine', 'Creatinine'], \
-        ['fibrinogen', 'Fibrinogen'], ['hematocrit', 'Hematocrit'], ['hemoglobin', 'Hemoglobin'], \
-        ['so2', 'Oxygen saturation'], ['pco2', 'Partial pressure of carbon dioxide'], \
+        ['alt', 'Alanine aminotransferase'], ['albumin', 'Albumin'], ['alp', 'Alkaline phosphate'],
+        ['aniongap', 'Anion gap'], ['ast', 'Asparate aminotransferase'], ['bicarbonate', 'Bicarbonate'],
+        ['bilirubin_total', 'Bilirubin'], ['bilirubin_direct', 'Bilirubin_direct'], ['calcium', 'Calcium ionized'],
+        ['chloride', 'Chloride'], ['creatinine', 'Creatinine'],
+        ['fibrinogen', 'Fibrinogen'], ['hematocrit', 'Hematocrit'], ['hemoglobin', 'Hemoglobin'],
+        ['so2', 'Oxygen saturation'], ['pco2', 'Partial pressure of carbon dioxide'],
         ['platelet', 'Platelets'], ['potassium', 'Potassium'], ['inr', 'Prothrombin time INR'],
-        ['pt', 'Prothrombin time PT'], \
-        ['resp_rate', 'Respiratory rate'], ['sodium', 'Sodium'], ['wbc', 'White blood cell count'], \
+        ['pt', 'Prothrombin time PT'],
+        ['resp_rate', 'Respiratory rate'], ['sodium', 'Sodium'], ['wbc', 'White blood cell count'],
         ['lactate', 'Lactic acid'], ['ph', 'pH'], ['bun', 'Blood urea nitrogen']]
 
     for names in names_list:
@@ -444,8 +439,8 @@ def extract_mimic(args):
         chart_lab.drop(names[1], axis=1, level=0, inplace=True)
 
     # In eicu mbp contains both invasive and non-invasive, so combine them
-    names_list = [['dbp', 'Diastolic blood pressure'], ['dbp_ni', 'Diastolic blood pressure'], \
-                  ['mbp', 'Mean blood pressure'], ['mbp_ni', 'Mean blood pressure'], \
+    names_list = [['dbp', 'Diastolic blood pressure'], ['dbp_ni', 'Diastolic blood pressure'],
+                  ['mbp', 'Mean blood pressure'], ['mbp_ni', 'Mean blood pressure'],
                   ['sbp', 'Systolic blood pressure'], ['sbp_ni', 'Systolic blood pressure']]
 
     for names in names_list:
@@ -523,7 +518,8 @@ def extract_mimic(args):
 
     # query antibiotics
     query = """
-    select i.subject_id, i.hadm_id, v.stay_id, v.starttime, v.stoptime as endtime, v.antibiotic, v.route, i.icu_intime, i.icu_outtime 
+    select i.subject_id, i.hadm_id, v.stay_id, v.starttime, v.stoptime as endtime, v.antibiotic, 
+    v.route, i.icu_intime, i.icu_outtime 
     FROM physionet-data.mimic_derived.icustay_detail i
     INNER JOIN physionet-data.mimic_derived.antibiotic v ON i.stay_id = v.stay_id
     where v.stay_id in ({icuids})
@@ -598,7 +594,8 @@ def extract_mimic(args):
     # crrt
     query = \
         """
-    SELECT cr.stay_id, MIN(cr.charttime) as starttime, MAX(cr.charttime) as endtime, i.subject_id, i.hadm_id, i.icu_intime, i.icu_outtime
+    SELECT cr.stay_id, MIN(cr.charttime) as starttime, MAX(cr.charttime) as endtime, i.subject_id, 
+    i.hadm_id, i.icu_intime, i.icu_outtime
     FROM physionet-data.mimic_derived.crrt cr
     INNER JOIN physionet-data.mimic_derived.icustay_detail i ON i.stay_id = cr.stay_id
     WHERE cr.stay_id in ({ids}) 
@@ -680,10 +677,10 @@ def extract_mimic(args):
         AND  endtime > i.icu_intime 
         ORDER BY stay_id
         """.format(ids=','.join(icuids_to_keep))
-    platelats_trans = gcp2df(query)
-    platelats_trans = compile_intervention(platelats_trans, 'platelats_trans')
+    platelets_trans = gcp2df(query)
+    platelets_trans = compile_intervention(platelets_trans, 'platelats_trans')
     intervention = intervention.merge(
-        platelats_trans[['subject_id', 'hadm_id', 'stay_id', 'hours_in', 'platelats_trans']],
+        platelets_trans[['subject_id', 'hadm_id', 'stay_id', 'hours_in', 'platelats_trans']],
         on=['subject_id', 'hadm_id', 'stay_id', 'hours_in'],
         how='left'
     )
@@ -767,8 +764,8 @@ def extract_mimic(args):
         -- remove carevue 
         -- some colloids are charted in chartevents
     
-        select
-        coll.stay_id, coll.charttime as starttime, coll.endtime, coll.amount as colloid_bolus,  i.subject_id, i.hadm_id, i.icu_intime, i.icu_outtime
+        select coll.stay_id, coll.charttime as starttime, coll.endtime, coll.amount as colloid_bolus, 
+        i.subject_id, i.hadm_id, i.icu_intime, i.icu_outtime
         from coll
         INNER JOIN physionet-data.mimic_derived.icustay_detail i ON i.stay_id = coll.stay_id
         -- just because the rate was high enough, does *not* mean the final amount was
@@ -833,7 +830,8 @@ def extract_mimic(args):
                 )
             )
     
-        select crys.stay_id, crys.charttime as starttime, crys.endtime, crys.amount as crystalloid_bolus, i.subject_id, i.hadm_id, i.icu_intime, i.icu_outtime
+        select crys.stay_id, crys.charttime as starttime, crys.endtime, crys.amount as crystalloid_bolus, 
+        i.subject_id, i.hadm_id, i.icu_intime, i.icu_outtime
         from crys
         INNER JOIN physionet-data.mimic_derived.icustay_detail i ON i.stay_id = crys.stay_id
         WHERE charttime < i.icu_outtime
@@ -874,7 +872,11 @@ def extract_mimic(args):
     anchor_year = gcp2df(query)
 
     query = """
-    select c.subject_id, c.hadm_id, i.stay_id, c.myocardial_infarct, c.congestive_heart_failure, c.peripheral_vascular_disease, c.cerebrovascular_disease, c.dementia, c.chronic_pulmonary_disease, c.rheumatic_disease, c.peptic_ulcer_disease, c.mild_liver_disease, c.diabetes_without_cc, c.diabetes_with_cc, c.paraplegia, c.renal_disease, c.malignant_cancer, c.severe_liver_disease, c.metastatic_solid_tumor, c.aids
+    select c.subject_id, c.hadm_id, i.stay_id, c.myocardial_infarct, c.congestive_heart_failure, 
+    c.peripheral_vascular_disease, c.cerebrovascular_disease, c.dementia, c.chronic_pulmonary_disease, 
+    c.rheumatic_disease, c.peptic_ulcer_disease, c.mild_liver_disease, c.diabetes_without_cc, 
+    c.diabetes_with_cc, c.paraplegia, c.renal_disease, c.malignant_cancer, c.severe_liver_disease, 
+    c.metastatic_solid_tumor, c.aids
     FROM physionet-data.mimic_derived.charlson c
     INNER JOIN physionet-data.mimic_derived.icustay_detail i ON i.hadm_id = c.hadm_id
     where i.stay_id in ({icuids})

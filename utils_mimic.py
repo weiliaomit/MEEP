@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 '''
 Some Util funcs adapted from MIMIC-Extract:
 https://github.com/MLforHealth/MIMIC_Extract
@@ -7,44 +8,48 @@ and Marzyeh Ghassemi. MIMIC-Extract: A Data Extraction, Preprocessing, and Repre
 Pipeline for MIMIC-III. arXiv:1907.08322. 
 '''
 to_hours = lambda x: max(0, x.days * 24 + x.seconds // 3600)
-def combine_cols(a, b):
-    b.columns.names = ['LEVEL2', 'Aggregation Function']
-    a = a.droplevel(level=0, axis=1)
-    b = b.droplevel(level=0, axis=1)
 
-    or_filled = len(b) - b.loc[:, 'mean'].isnull().sum()
-    or_mean = b.loc[:, 'mean'].dropna().mean()
 
-    row_mask = (a.loc[:, 'count'] > 0).values
-    mask = (b.loc[:, 'count'] > 0).values
+def combine_cols(col_1, col_2):
+    col_2.columns.names = ['LEVEL2', 'Aggregation Function']
+    col_1 = col_1.droplevel(level=0, axis=1)
+    col_2 = col_2.droplevel(level=0, axis=1)
 
-    c = b.loc[row_mask * mask, 'count'].mul(b.loc[row_mask * mask, 'mean'].values) + \
-        a.loc[row_mask * mask, 'count'].mul(a.loc[row_mask * mask, 'mean'].values)
-    d = b.loc[row_mask * mask, 'count'] + a.loc[row_mask * mask, 'count']
+    # or_filled = len(b) - b.loc[:, 'mean'].isnull().sum()
+    # or_mean = b.loc[:, 'mean'].dropna().mean()
 
-    b.loc[row_mask * mask, 'mean'] = c / d
-    b.loc[:, 'count'] = b.loc[:, 'count'] + a.loc[:, 'count']
+    row_mask = (col_1.loc[:, 'count'] > 0).values
+    mask = (col_2.loc[:, 'count'] > 0).values
 
-    b.loc[~mask, 'mean'] = a.loc[~mask, 'mean']
+    c = col_2.loc[row_mask * mask, 'count'].mul(col_2.loc[row_mask * mask, 'mean'].values) + \
+        col_1.loc[row_mask * mask, 'count'].mul(col_1.loc[row_mask * mask, 'mean'].values)
+    d = col_2.loc[row_mask * mask, 'count'] + col_1.loc[row_mask * mask, 'count']
 
-    c_filled = len(b) - b.loc[:, 'mean'].isnull().sum()
-    c_mean = b.loc[:, 'mean'].dropna().mean()
+    col_2.loc[row_mask * mask, 'mean'] = c / d
+    col_2.loc[:, 'count'] = col_2.loc[:, 'count'] + col_1.loc[:, 'count']
 
-    print('Original mean is %.3f, original filled is %d\nCombined mean is %.3f, combined filled is %d\n' % (
-    or_mean, or_filled, c_mean, c_filled))
-    return b
+    col_2.loc[~mask, 'mean'] = col_1.loc[~mask, 'mean']
+
+    # c_filled = len(b) - b.loc[:, 'mean'].isnull().sum()
+    # c_mean = b.loc[:, 'mean'].dropna().mean()
+
+    # print('Original mean is %.3f, original filled is %d\nCombined mean is %.3f, combined filled is %d\n' % (
+    # or_mean, or_filled, c_mean, c_filled))
+    return col_2
 
 
 def range_unnest(df, col, out_col_name=None, reset_index=False):
     assert len(df.index.names) == 1, "Does not support multi-index."
-    if out_col_name is None: out_col_name = col
+    if out_col_name is None:
+        out_col_name = col
 
     col_flat = pd.DataFrame(
         [[i, x] for i, y in df[col].iteritems() for x in range(y + 1)],
         columns=[df.index.names[0], out_col_name]
     )
 
-    if not reset_index: col_flat = col_flat.set_index(df.index.names[0])
+    if not reset_index:
+        col_flat = col_flat.set_index(df.index.names[0])
     return col_flat
 
 
@@ -85,7 +90,7 @@ def add_outcome_indicators(out_gb):
     # icustay_id = out_gb['stay_id'].unique()[0]
     max_hrs = out_gb['max_hours'].unique()[0]
     on_hrs = set()
-    on_values = []
+    # on_values = []
 
     # p_set = on_hrs.copy()
     for index, row in out_gb.iterrows():
@@ -96,7 +101,7 @@ def add_outcome_indicators(out_gb):
         # p_set = on_hrs.copy()
 
     off_hrs = set(range(max_hrs + 1)) - on_hrs
-    ##values flatten a nested list
+    # values flatten a nested list
     # values = [0]*len(off_hrs) + [item for sublist in on_values for item in sublist]
     on_vals = [0] * len(off_hrs) + [1] * len(on_hrs)
     hours = list(off_hrs) + list(on_hrs)
@@ -124,7 +129,7 @@ def add_antibitics_indicators(out_gb):
         p_set = on_hrs.copy()
 
     off_hrs = set(range(max_hrs + 1)) - on_hrs
-    ##values flatten a nested list
+    # values flatten a nested list
     values = [np.nan] * len(off_hrs) + [item for sublist in on_values for item in sublist]
     route = [np.nan] * len(off_hrs) + [item for sublist in on_route for item in sublist]
     # on_vals = [0]*len(off_hrs) + [1]*len(on_hrs)
@@ -155,6 +160,7 @@ def continuous_outcome_processing(out_data, data, icustay_timediff):
     data : pd.DataFrame
         index=icustay_id
         Contains full population of static demographic data
+    icustay_timediff:
     Returns
     -------
     out_data : pd.DataFrame
@@ -167,5 +173,4 @@ def continuous_outcome_processing(out_data, data, icustay_timediff):
     out_data['endtime'] = out_data['endtime'] - out_data['icu_intime']
     out_data['endtime'] = out_data.endtime.apply(lambda x: x.days * 24 + x.seconds // 3600)
     out_data = out_data.groupby(['stay_id'])
-
     return out_data
