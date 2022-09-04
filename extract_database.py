@@ -5,6 +5,7 @@ import os
 import numpy as np
 import pandas as pd
 from utils_mimic import *
+
 auth.authenticate_user()
 
 
@@ -88,10 +89,11 @@ def extract_mimic(args):
                 """
             id_df = gcp2df(query)
             group_stay_ids = set([str(s) for s in id_df['stay_id']])
-        # elif args.custom_id == True:
+        elif args.custom_id == True:
+            custom_ids = pd.read_csv(args.customid_dir)
+            group_stay_ids = set([str(s) for s in custom_ids['stay_id']])
 
         return group_stay_ids
-
 
     # define our patient cohort by age, icu stay time
     if args.patient_group != 'Generic':
@@ -138,7 +140,8 @@ def extract_mimic(args):
                 and (i.icu_outtime <= (i.icu_intime + INTERVAL {max_los} Hour))
             ORDER BY subject_id
             ;
-            """.format(group_icuids=','.join(get_group_id(args)), min_age=args.age_min, min_los=args.los_min, max_los=args.los_max)
+            """.format(group_icuids=','.join(get_group_id(args)), min_age=args.age_min, min_los=args.los_min,
+                       max_los=args.los_max)
         patient = gcp2df(query)
     else:
         query = \
@@ -1016,14 +1019,19 @@ def extract_mimic(args):
     range_dict_high = {'so2': 100, 'po2': 770, 'pco2': 220, 'ph': 10, 'baseexcess': 100, 'bicarbonate': 66,
                        'chloride': 200, 'hemoglobin': 30, 'hematocrit': 100, 'calcium': 1.87, 'temperature': 47,
                        'potassium': 15, 'sodium': 250, 'lactate': 33, 'glucose': 2200, 'heart_rate': 390, 'sbp': 375,
-                       'sbp_ni': 375, 'mbp': 375, 'mbp_ni': 375, 'dbp': 375, 'dbp_ni': 375, 'resp_rate': 330, 'wbc': 1100,
+                       'sbp_ni': 375, 'mbp': 375, 'mbp_ni': 375, 'dbp': 375, 'dbp_ni': 375, 'resp_rate': 330,
+                       'wbc': 1100,
                        'atypical_lymphocytes': 17, 'bun': 300, 'calcium_chem': 28, 'fibrinogen': 1709, 'Phosphate': 22,
-                       'Positive end-expiratory pressure': 30, 'ck_cpk': 10000, 'ggt': 10000, 'Peak inspiratory pressure': 40,
+                       'Positive end-expiratory pressure': 30, 'ck_cpk': 10000, 'ggt': 10000,
+                       'Peak inspiratory pressure': 40,
                        'Magnesium': 22, 'Plateau Pressure': 61, 'Tidal Volume Observed': 2000, 'nrbc': 143, 'inr': 15,
-                       'pt': 150, 'mch': 46, 'mchc': 43, 'troponin_t': 24, 'albumin': 60, 'aniongap': 55, 'creatinine': 66,
-                       'platelet': 2200, 'alt': 11000, 'ast': 22000, 'alp': 4000, 'ld_ldh': 35000, 'bilirubin_total': 66,
-                       'bilirubin_indirect': 66, 'bilirubin_direct': 66, 'weight': 550, 'uo': 2445, 'Central Venous Pressure': 400 }
-    range_dict_low = {'ph': 6.3, 'baseexcess': -100,  'temperature': 14.2, 'lactate': 0.01, 'uo': 0, 'pH urine': 3}
+                       'pt': 150, 'mch': 46, 'mchc': 43, 'troponin_t': 24, 'albumin': 60, 'aniongap': 55,
+                       'creatinine': 66,
+                       'platelet': 2200, 'alt': 11000, 'ast': 22000, 'alp': 4000, 'ld_ldh': 35000,
+                       'bilirubin_total': 66,
+                       'bilirubin_indirect': 66, 'bilirubin_direct': 66, 'weight': 550, 'uo': 2445,
+                       'Central Venous Pressure': 400}
+    range_dict_low = {'ph': 6.3, 'baseexcess': -100, 'temperature': 14.2, 'lactate': 0.01, 'uo': 0, 'pH urine': 3}
 
     for var_to_remove in range_dict_high:
         remove_outliers_h(vital_final, X_mean, var_to_remove, range_dict_high[var_to_remove])
@@ -1036,7 +1044,8 @@ def extract_mimic(args):
     vital_final.loc[:, mean_col] = (vital_final.loc[:, mean_col] - col_means) / col_stds
     icustay_means = vital_final.loc[:, mean_col].groupby(ID_COLS).mean()
     # impute
-    vital_final.loc[:, mean_col] = vital_final.loc[:, mean_col].groupby(ID_COLS).fillna(method='ffill').groupby(ID_COLS).fillna(
+    vital_final.loc[:, mean_col] = vital_final.loc[:, mean_col].groupby(ID_COLS).fillna(method='ffill').groupby(
+        ID_COLS).fillna(
         icustay_means).fillna(0)
     # 0 or 1
     vital_final.loc[:, count_col] = (vital_final.loc[:, count_col] > 0).astype(float)
@@ -1075,4 +1084,1358 @@ def extract_mimic(args):
 
 
 def extract_eicu(args):
+    os.environ["GOOGLE_CLOUD_PROJECT"] = args.project_id
+    client = bigquery.Client(project=args.project_id)
+
+    def gcp2df(sql, job_config=None):
+        que = client.query(sql, job_config)
+        results = que.result()
+        return results.to_dataframe()
+
+    # level_to_change = 1
+    ID_COLS = ['patientunitstayid']
+    # minutes to hour
+    to_hours = lambda x: int(x // 60)
+
+    def get_group_id(args):
+        if args.patient_group == 'sepsis-3':
+            sepsis3_ids = pd.read_csv('./resources/sepsis3_eicu.csv')
+            group_stay_ids = set([str(s) for s in sepsis3_ids['patientunitstayid']])
+        elif args.patient_group == 'ARF':
+            query = \
+                """
+                SELECT DISTINCT l.patientunitstayid
+                FROM physionet-data.eicu_crd.lab l
+                WHERE l.labname = 'PEEP' 
+                and l.labresult >= 0 
+                and l.labresult <= 30
+                
+                UNION ALL
+                
+                SELECT DISTINCT vt.patientunitstayid 
+                FROM (
+                    SELECT Distinct i.patientunitstayid, i.priorventstartoffset, i.priorventendoffset	
+                    From physionet-data.eicu_crd.respiratorycare i
+                    WHERE i.priorventstartoffset >0 or i.priorventendoffset	>0
+                    Order by patientunitstayid
+                ) vt
+                INNER JOIN physionet-data.eicu_crd_derived.icustay_detail i ON i.patientunitstayid = vt.patientunitstayid
+                WHERE  vt.priorventstartoffset is not null 
+                AND vt.priorventendoffset is not null
+                AND FLOOR(LEAST(vt.priorventendoffset, i.unitdischargeoffset)/60) > FLOOR(GREATEST(vt.priorventstartoffset, 0)/60)
+                """
+            id_df = gcp2df(query)
+            group_stay_ids = set([str(s) for s in id_df['patientunitstayid']])
+        elif args.patient_group == 'Shock':
+            query = \
+                """
+                SELECT DISTINCT pm.patientunitstayid, 
+                FROM physionet-data.eicu_crd_derived.pivoted_med pm
+                INNER JOIN physionet-data.eicu_crd_derived.icustay_detail i ON i.patientunitstayid = pm.patientunitstayid
+                WHERE (pm.dopamine = 1 or pm.norepinephrine = 1 or pm.epinephrine = 1 or pm.vasopressin = 1 or pm. phenylephrine = 1)
+                AND pm.drugorderoffset is not null 
+                AND pm.drugstopoffset is not null
+                AND FLOOR(LEAST(pm.drugstopoffset, i.unitdischargeoffset)/60) > FLOOR(GREATEST(pm.drugorderoffset, 0)/60)
+                """
+            id_df = gcp2df(query)
+            group_stay_ids = set([str(s) for s in id_df['patientunitstayid']])
+        elif args.patient_group == 'CHF':
+            query = \
+                """
+                SELECT DISTINCT ad.patientunitstayid,
+                FROM physionet-data.eicu_crd.diagnosis ad
+                WHERE SUBSTR(ad.icd9code, 1, 3) = '428'
+                OR SUBSTR(ad.icd9code, 1, 6) IN ('398.91','402.01','402.11','402.91','404.01','404.03',
+                                        '404.11','404.13','404.91','404.93')
+                OR SUBSTR(ad.icd9code, 1, 5) BETWEEN '425.4' AND '425.9'
+                """
+            id_df = gcp2df(query)
+            group_stay_ids = set([str(s) for s in id_df['patientunitstayid']])
+        elif args.patient_group == 'COPD':
+            query = \
+                """
+                SELECT DISTINCT ad.patientunitstayid,
+                FROM physionet-data.eicu_crd.diagnosis ad
+                WHERE SUBSTR(ad.icd9code, 1, 3) BETWEEN '490' AND '505'
+                OR SUBSTR(ad.icd9code, 1, 5) IN ('416.8','416.9','506.4','508.1','508.8')
+                """
+            id_df = gcp2df(query)
+            group_stay_ids = set([str(s) for s in id_df['patientunitstayid']])
+        elif args.custom_id:
+            custom_ids = pd.read_csv(args.customid_dir)
+            group_stay_ids = set([str(s) for s in custom_ids['stay_id']])
+
+        return group_stay_ids
+
+    if args.patient_group != 'Generic':
+        query = \
+            """
+            SELECT i.patientunitstayid, i.gender, i.age, i.ethnicity,  
+                    CASE WHEN lower(i.hospitaldischargestatus) like '%alive%' THEN 0
+                        WHEN lower(i.hospitaldischargestatus) like '%expired%' THEN 1
+                        ELSE NULL END AS hosp_mort,
+                    ROUND(i.unitdischargeoffset/60) AS icu_los_hours, i.hospitaladmitoffset, i.hospitaldischargeoffset,
+                   i.unitdischargeoffset, i.hospitaladmitsource, i.unitdischargelocation, 
+                   CASE WHEN lower(i.unitdischargestatus) like '%alive%' THEN 0
+                        WHEN lower(i.unitdischargestatus) like '%expired%' THEN 1
+                        ELSE NULL END AS icu_mort, i.hospitaldischargeyear, i.hospitalid      
+            From physionet-data.eicu_crd.patient i
+            WHERE ROUND(i.unitdischargeoffset/60) Between {min_los} and {max_los} 
+            AND patientunitstayid in ({group_icuids})
+            AND age not in ({young_age})
+            """.format(group_icuids=','.join(get_group_id(args)), min_los=args.los_min,
+                       max_los=args.los_max, young_age=','.join(set([str(i) for i in range(args.age_min)])))
+        patient = gcp2df(query)
+
+    else:
+        query = \
+            """
+            SELECT i.patientunitstayid, i.gender, i.age, i.ethnicity,  
+                    CASE WHEN lower(i.hospitaldischargestatus) like '%alive%' THEN 0
+                        WHEN lower(i.hospitaldischargestatus) like '%expired%' THEN 1
+                        ELSE NULL END AS hosp_mort,
+                    ROUND(i.unitdischargeoffset/60) AS icu_los_hours, i.hospitaladmitoffset, i.hospitaldischargeoffset,
+                   i.unitdischargeoffset, i.hospitaladmitsource, i.unitdischargelocation, 
+                   CASE WHEN lower(i.unitdischargestatus) like '%alive%' THEN 0
+                        WHEN lower(i.unitdischargestatus) like '%expired%' THEN 1
+                        ELSE NULL END AS icu_mort, i.hospitaldischargeyear, i.hospitalid      
+            From physionet-data.eicu_crd.patient i
+            WHERE ROUND(i.unitdischargeoffset/60) Between {min_los} and {max_los} 
+            AND age not in ({young_age})
+            """.format(min_los=args.los_min, max_los=args.los_max, young_age=','.join(set([str(i) for i in range(args.age_min)])))
+
+    patient['unitadmitoffset'] = 0
+    icuids_to_keep = patient['patientunitstayid']
+    icuids_to_keep = set([str(s) for s in icuids_to_keep])
+    patient.set_index('patientunitstayid', inplace=True)
+    patient['max_hours'] = (patient['unitdischargeoffset'] - patient['unitadmitoffset']).apply(to_hours)
+    missing_hours_fill = range_unnest(patient, 'max_hours', out_col_name='hours_in', reset_index=True)
+    missing_hours_fill['tmp'] = np.NaN
+    fill_df = patient.reset_index()[ID_COLS].join(missing_hours_fill.set_index('patientunitstayid'),
+                                                  on='patientunitstayid')
+    fill_df.set_index(ID_COLS + ['hours_in'], inplace=True)
+
+    # Dynamic Table
+    query = """
+    with vw0 as
+    (
+      select
+          patientunitstayid
+        , labname
+        , labresultoffset
+        , labresultrevisedoffset
+      from physionet-data.eicu_crd.lab
+      where labname in
+      (
+            'paO2'
+          , 'paCO2'
+          , 'pH'
+          , 'FiO2'
+          , 'anion gap'
+          , 'Base Excess'
+          , 'PEEP'
+      )
+      group by patientunitstayid, labname, labresultoffset, labresultrevisedoffset
+      having count(distinct labresult)<=1
+    )
+    -- get the last lab to be revised
+    , vw1 as
+    (
+      select
+          lab.patientunitstayid
+        , lab.labname
+        , lab.labresultoffset
+        , lab.labresultrevisedoffset
+        , lab.labresult
+        , ROW_NUMBER() OVER
+            (
+              PARTITION BY lab.patientunitstayid, lab.labname, lab.labresultoffset
+              ORDER BY lab.labresultrevisedoffset DESC
+            ) as rn
+      from physionet-data.eicu_crd.lab
+      inner join vw0
+        ON  lab.patientunitstayid = vw0.patientunitstayid
+        AND lab.labname = vw0.labname
+        AND lab.labresultoffset = vw0.labresultoffset
+        AND lab.labresultrevisedoffset = vw0.labresultrevisedoffset
+      WHERE
+         (lab.labname = 'paO2' and lab.labresult > 0 and lab.labresult <= 770)
+      OR (lab.labname = 'paCO2' and lab.labresult > 0 and lab.labresult <= 220)
+      OR (lab.labname = 'pH' and lab.labresult >= 6.3 and lab.labresult <= 10)
+      OR (lab.labname = 'FiO2' and lab.labresult >= 0.2 and lab.labresult <= 1.0)
+      -- we will fix fio2 units later
+      OR (lab.labname = 'FiO2' and lab.labresult >= 20 and lab.labresult <= 100)
+      OR (lab.labname = 'anion gap' and lab.labresult >= 0 and lab.labresult <= 55)
+      OR (lab.labname = 'Base Excess' and lab.labresult >= -100 and lab.labresult <= 100)
+      OR (lab.labname = 'PEEP' and lab.labresult >= 0 and lab.labresult <= 30)
+    )
+    select
+        patientunitstayid
+      , labresultoffset as chartoffset
+      -- the aggregate (max()) only ever applies to 1 value due to the where clause
+      , MAX(case
+            when labname != 'FiO2' then null
+            when labresult >= 20 then labresult/100.0
+          else labresult end) as fio2
+      , MAX(case when labname = 'paO2' then labresult else null end) as pao2
+      , MAX(case when labname = 'paCO2' then labresult else null end) as paco2
+      , MAX(case when labname = 'pH' then labresult else null end) as pH
+      , MAX(case when labname = 'anion gap' then labresult else null end) as aniongap
+      , MAX(case when labname = 'Base Deficit' then labresult else null end) as basedeficit
+      , MAX(case when labname = 'Base Excess' then labresult else null end) as baseexcess
+      , MAX(case when labname = 'PEEP' then labresult else null end) as peep
+    from vw1
+    where rn = 1
+    and patientunitstayid in ({icuids})
+    and labresultoffset >=0
+    group by patientunitstayid, labresultoffset
+    order by patientunitstayid, labresultoffset
+    """.format(icuids=','.join(icuids_to_keep))
+    bg = gcp2df(query)
+    bg = fill_query(bg, fill_df)
+
+    query = """
+    with vw0 as
+    (
+      select
+          patientunitstayid
+        , labname
+        , labresultoffset
+        , labresultrevisedoffset
+      from physionet-data.eicu_crd.lab
+      where labname in
+      (
+          'albumin'
+        , 'total bilirubin'
+        , 'BUN'
+        , 'calcium'
+        , 'chloride'
+        , 'creatinine'
+        , 'bedside glucose', 'glucose'
+        , 'bicarbonate' -- HCO3
+        , 'Total CO2'
+        , 'Hct'
+        , 'Hgb'
+        , 'PT - INR'
+        , 'PTT'
+        , 'lactate'
+        , 'platelets x 1000'
+        , 'potassium'
+        , 'sodium'
+        -- cbc related 
+        , 'WBC x 1000'
+        , '-bands'
+        , '-basos'
+        , '-eos'
+        , '-lymphs'
+        , '-monos'
+        , '-polys'
+        -- Liver enzymes
+        , 'ALT (SGPT)'
+        , 'AST (SGOT)'
+        , 'alkaline phos.'
+        -- Other 
+        , 'troponin - T'
+        , 'CPK-MB'
+        , 'total protein'
+        , 'fibrinogen'
+        , 'PT'
+        , 'MCH'
+        , 'MCHC'
+        , 'MCV'
+        , 'RBC'
+        , 'RDW'
+        , 'amylase'
+        , 'CPK'
+        , 'CRP'
+      )
+      group by patientunitstayid, labname, labresultoffset, labresultrevisedoffset
+      having count(distinct labresult)<=1
+    )
+    -- get the last lab to be revised
+    , vw1 as
+    (
+      select
+          lab.patientunitstayid
+        , lab.labname
+        , lab.labresultoffset
+        , lab.labresultrevisedoffset
+        , lab.labresult
+        , ROW_NUMBER() OVER
+            (
+              PARTITION BY lab.patientunitstayid, lab.labname, lab.labresultoffset
+              ORDER BY lab.labresultrevisedoffset DESC
+            ) as rn
+      from physionet-data.eicu_crd.lab
+      inner join vw0
+        ON  lab.patientunitstayid = vw0.patientunitstayid
+        AND lab.labname = vw0.labname
+        AND lab.labresultoffset = vw0.labresultoffset
+        AND lab.labresultrevisedoffset = vw0.labresultrevisedoffset
+      -- only valid lab values
+      WHERE
+           (lab.labname = 'albumin' and lab.labresult > 0 and lab.labresult <=60)
+        OR (lab.labname = 'total bilirubin' and lab.labresult > 0 and lab.labresult <= 66)
+        OR (lab.labname = 'BUN' and lab.labresult > 0 and lab.labresult <= 300)
+        OR (lab.labname = 'calcium' and lab.labresult > 0 and lab.labresult <= 9999)
+        OR (lab.labname = 'chloride' and lab.labresult > 0 and lab.labresult <= 9999)
+        OR (lab.labname = 'creatinine' and lab.labresult >0 and lab.labresult <= 66)
+        OR (lab.labname in ('bedside glucose', 'glucose') and lab.labresult > 0 and lab.labresult <= 2200)
+        OR (lab.labname = 'bicarbonate' and lab.labresult > 0 and lab.labresult <= 9999)
+        OR (lab.labname = 'Total CO2' and lab.labresult > 0 and lab.labresult <= 9999)
+        -- will convert hct unit to fraction later
+        OR (lab.labname = 'Hct' and lab.labresult > 0 and lab.labresult <= 100)
+        OR (lab.labname = 'Hgb' and lab.labresult > 0 and lab.labresult <= 9999)
+        OR (lab.labname = 'PT - INR' and lab.labresult > 0 and lab.labresult <= 15)
+        OR (lab.labname = 'lactate' and lab.labresult > 0 and lab.labresult <= 33)
+        OR (lab.labname = 'platelets x 1000' and lab.labresult >  0 and lab.labresult <= 9999)
+        OR (lab.labname = 'potassium' and lab.labresult > 0 and lab.labresult <= 15)
+        OR (lab.labname = 'PTT' and lab.labresult >  0 and lab.labresult <=9999)
+        OR (lab.labname = 'sodium' and lab.labresult > 0 and lab.labresult <= 250)
+        OR (lab.labname = 'WBC x 1000' and lab.labresult > 0 and lab.labresult <= 1100)
+        OR (lab.labname = '-bands' and lab.labresult > 0 and lab.labresult <= 100)
+        OR (lab.labname = '-basos' and lab.labresult > 0)
+        OR (lab.labname = '-eos' and lab.labresult > 0)
+        OR (lab.labname = '-lymphs' and lab.labresult > 0)
+        OR (lab.labname = '-monos' and lab.labresult > 0)
+        OR (lab.labname = '-polys' and lab.labresult > 0)
+        OR (lab.labname = 'ALT (SGPT)' and lab.labresult > 0)
+        OR (lab.labname = 'AST (SGOT)' and lab.labresult > 0)
+        OR (lab.labname = 'alkaline phos.' and lab.labresult > 0)
+        OR (lab.labname = 'troponin - T' and lab.labresult > 0)
+        OR (lab.labname = 'CPK-MB' and lab.labresult > 0)
+        OR (lab.labname = 'total protein' and lab.labresult > 0)
+        OR (lab.labname = 'fibrinogen' and lab.labresult > 0)
+        OR (lab.labname = 'PT' and lab.labresult > 0)
+        OR (lab.labname = 'MCH' and lab.labresult > 0)
+        OR (lab.labname = 'MCHC' and lab.labresult > 0)
+        OR (lab.labname = 'MCV' and lab.labresult > 0)
+        OR (lab.labname = 'RBC' and lab.labresult > 0)
+        OR (lab.labname = 'RDW' and lab.labresult > 0)
+        OR (lab.labname = 'amylase' and lab.labresult > 0)
+        OR (lab.labname = 'CPK' and lab.labresult > 0)
+        OR (lab.labname = 'CRP' and lab.labresult > 0)
+    )
+    select
+        patientunitstayid
+      , labresultoffset as chartoffset
+      , MAX(case when labname = 'albumin' then labresult else null end) as albumin
+      , MAX(case when labname = 'total bilirubin' then labresult else null end) as bilirubin
+      , MAX(case when labname = 'BUN' then labresult else null end) as BUN
+      , MAX(case when labname = 'calcium' then labresult else null end) as calcium
+      , MAX(case when labname = 'chloride' then labresult else null end) as chloride
+      , MAX(case when labname = 'creatinine' then labresult else null end) as creatinine
+      , MAX(case when labname in ('bedside glucose', 'glucose') then labresult else null end) as glucose
+      , MAX(case when labname = 'bicarbonate' then labresult else null end) as bicarbonate
+      , MAX(case when labname = 'Total CO2' then labresult else null end) as TotalCO2
+      , MAX(case when labname = 'Hct' then labresult else null end) as hematocrit
+      , MAX(case when labname = 'Hgb' then labresult else null end) as hemoglobin
+      , MAX(case when labname = 'PT - INR' then labresult else null end) as INR
+      , MAX(case when labname = 'lactate' then labresult else null end) as lactate
+      , MAX(case when labname = 'platelets x 1000' then labresult else null end) as platelets
+      , MAX(case when labname = 'potassium' then labresult else null end) as potassium
+      , MAX(case when labname = 'PTT' then labresult else null end) as ptt
+      , MAX(case when labname = 'sodium' then labresult else null end) as sodium
+      , MAX(case when labname = 'WBC x 1000' then labresult else null end) as wbc
+      , MAX(case when labname = '-bands' then labresult else null end) as bands
+      , MAX(case when labname = '-basos' then labresult else null end) as basos
+      , MAX(case when labname = '-eos' then labresult else null end) as eos
+      , MAX(case when labname = '-lymphs' then labresult else null end) as lymphs
+      , MAX(case when labname = '-monos' then labresult else null end) as monos
+      , MAX(case when labname = '-polys' then labresult else null end) as polys
+      , MAX(case when labname = 'ALT (SGPT)' then labresult else null end) as alt
+      , MAX(case when labname = 'AST (SGOT)' then labresult else null end) as ast
+      , MAX(case when labname = 'alkaline phos.' then labresult else null end) as alp
+      , MAX(case when labname = 'troponin - T' then labresult else null end) as troponin_t
+      , MAX(case when labname = 'CPK-MB' then labresult else null end) as cpk_mb
+      , MAX(case when labname = 'total protein' then labresult else null end) as total_protein
+      , MAX(case when labname = 'fibrinogen' then labresult else null end) as fibrinogen
+      , MAX(case when labname = 'PT' then labresult else null end) as pt
+      , MAX(case when labname = 'MCH' then labresult else null end) as mch
+      , MAX(case when labname = 'MCHC' then labresult else null end) as mchc
+      , MAX(case when labname = 'MCV' then labresult else null end) as mcv
+      , MAX(case when labname = 'RBC' then labresult else null end) as rbc
+      , MAX(case when labname = 'RDW' then labresult else null end) as rdw
+      , MAX(case when labname = 'amylase' then labresult else null end) as amylase
+      , MAX(case when labname = 'CPK' then labresult else null end) as cpk
+      , MAX(case when labname = 'CRP' then labresult else null end) as crp
+    from vw1
+    where rn = 1
+    and patientunitstayid in ({icuids})
+    and labresultoffset >=0 
+    group by patientunitstayid, labresultoffset
+    order by patientunitstayid, labresultoffset
+    """.format(icuids=','.join(icuids_to_keep))
+    lab = gcp2df(query)
+    lab = fill_query(lab, fill_df)
+
+    query = """
+    with nc as
+    (
+    select
+        patientunitstayid
+      , nursingchartoffset
+      , nursingchartentryoffset
+      , case
+          when nursingchartcelltypevallabel = 'Heart Rate'
+           and nursingchartcelltypevalname = 'Heart Rate'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          else null end
+        as heartrate
+      , case
+          when nursingchartcelltypevallabel = 'Respiratory Rate'
+           and nursingchartcelltypevalname = 'Respiratory Rate'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          else null end
+        as RespiratoryRate
+      , case
+          when nursingchartcelltypevallabel = 'O2 Saturation'
+           and nursingchartcelltypevalname = 'O2 Saturation'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          else null end
+        as o2saturation
+      , case
+          when nursingchartcelltypevallabel = 'Non-Invasive BP'
+           and nursingchartcelltypevalname = 'Non-Invasive BP Systolic'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          else null end
+        as nibp_systolic
+      , case
+          when nursingchartcelltypevallabel = 'Non-Invasive BP'
+           and nursingchartcelltypevalname = 'Non-Invasive BP Diastolic'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          else null end
+        as nibp_diastolic
+      , case
+          when nursingchartcelltypevallabel = 'Non-Invasive BP'
+           and nursingchartcelltypevalname = 'Non-Invasive BP Mean'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          else null end
+        as nibp_mean
+      , case
+          when nursingchartcelltypevallabel = 'Temperature'
+           and nursingchartcelltypevalname = 'Temperature (C)'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          else null end
+        as temperature
+      --, case
+      --    when nursingchartcelltypevallabel = 'Temperature'
+      --     and nursingchartcelltypevalname = 'Temperature Location'
+      --        then nursingchartvalue
+      --    else null end
+      --  as TemperatureLocation
+      , case
+          when nursingchartcelltypevallabel = 'Invasive BP'
+           and nursingchartcelltypevalname = 'Invasive BP Systolic'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          else null end
+        as ibp_systolic
+      , case
+          when nursingchartcelltypevallabel = 'Invasive BP'
+           and nursingchartcelltypevalname = 'Invasive BP Diastolic'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          else null end
+        as ibp_diastolic
+      , case
+          when nursingchartcelltypevallabel = 'Invasive BP'
+           and nursingchartcelltypevalname = 'Invasive BP Mean'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          -- other map fields
+          when nursingchartcelltypevallabel = 'MAP (mmHg)'
+           and nursingchartcelltypevalname = 'Value'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          when nursingchartcelltypevallabel = 'Arterial Line MAP (mmHg)'
+           and nursingchartcelltypevalname = 'Value'
+           and REGEXP_CONTAINS(nursingchartvalue, r'^[-]?[0-9]+[.]?[0-9]*$')
+           and nursingchartvalue not in ('-','.')
+              then cast(nursingchartvalue as numeric)
+          else null end
+        as ibp_mean
+      from physionet-data.eicu_crd.nursecharting
+      -- speed up by only looking at a subset of charted data
+      where nursingchartcelltypecat in
+      (
+        'Vital Signs','Scores','Other Vital Signs and Infusions'
+      )
+    )
+    select
+      patientunitstayid
+    , nursingchartoffset as chartoffset
+    , nursingchartentryoffset as entryoffset
+    , avg(case when heartrate > 0 and heartrate <= 390 then heartrate else null end) as heartrate
+    , avg(case when RespiratoryRate >= 0 and RespiratoryRate <= 330 then RespiratoryRate else null end) as RespiratoryRate
+    , avg(case when o2saturation >= 0 and o2saturation <= 100 then o2saturation else null end) as spo2
+    , avg(case when nibp_systolic > 0 and nibp_systolic <= 375 then nibp_systolic else null end) as nibp_systolic
+    , avg(case when nibp_diastolic > 0 and nibp_diastolic <= 375 then nibp_diastolic else null end) as nibp_diastolic
+    , avg(case when nibp_mean > 0 and nibp_mean <= 375 then nibp_mean else null end) as nibp_mean
+    , avg(case when temperature >= 14.2 and temperature <= 47 then temperature else null end) as temperature
+    --, max(temperaturelocation) as temperaturelocation
+    , avg(case when ibp_systolic > 0 and ibp_systolic <= 375 then ibp_systolic else null end) as ibp_systolic
+    , avg(case when ibp_diastolic > 0 and ibp_diastolic <= 375 then ibp_diastolic else null end) as ibp_diastolic
+    , avg(case when ibp_mean > 0 and ibp_mean <= 375 then ibp_mean else null end) as ibp_mean
+    from nc
+    WHERE (heartrate IS NOT NULL
+    OR RespiratoryRate IS NOT NULL
+    OR o2saturation IS NOT NULL
+    OR nibp_systolic IS NOT NULL
+    OR nibp_diastolic IS NOT NULL
+    OR nibp_mean IS NOT NULL
+    OR temperature IS NOT NULL
+    --OR temperaturelocation IS NOT NULL
+    OR ibp_systolic IS NOT NULL
+    OR ibp_diastolic IS NOT NULL
+    OR ibp_mean IS NOT NULL)
+    AND patientunitstayid in ({icuids})
+    AND nursingchartoffset >=0 
+    group by patientunitstayid, nursingchartoffset, nursingchartentryoffset
+    order by patientunitstayid, nursingchartoffset, nursingchartentryoffset
+    """.format(icuids=','.join(icuids_to_keep))
+    vital = gcp2df(query)
+
+    vital.drop('entryoffset', axis=1, inplace=True)
+    vital = fill_query(vital, fill_df)
+
+    # microlab
+    query = """
+    SELECT ml.patientunitstayid, ml.culturetakenoffset
+        , case
+            when ml.culturesite = 'Blood, Venipuncture' then 'culturesite0'
+            when ml.culturesite in ('Urine, Catheter Specimen', 'Urine, Voided Specimen') then 'culturesite1'
+            when ml.culturesite = 'Nasopharynx' then 'culturesite2'
+            when ml.culturesite = 'Stool' then 'culturesite3'
+            when ml.culturesite in ('Sputum, Tracheal Specimen', 'Sputum, Expectorated') then 'culturesite4'
+            when ml.culturesite = 'CSF' then 'culturesite8'
+            when ml.culturesite = 'Peritoneal Fluid' then 'culturesite9'
+            when ml.culturesite = 'Bronchial Lavage' then 'culturesite11'
+            when ml.culturesite = 'Rectal Swab' then 'culturesite12'
+            when ml.culturesite in ('Other', 'Wound, Decubitus', 'Pleural Fluid', 
+                  'Bile', 'Skin', 'Wound, Surgical', 'Wound, Drainage Fluid', 'Blood, Central Line', 'Abscess')
+                  then 'culturesite13'
+            else null end as culturesite
+        , case
+            when ml.organism = 'no growth' then 0
+            when ml.organism != ""  then 1
+            else null end as positive
+        , case 
+            when ml.antibiotic != ""  then 1
+            else null end as screen
+        , case 
+            when ml.sensitivitylevel = 'Sensitive' then 1
+            when ml.sensitivitylevel = 'Resistant' then 0 
+            else null end as has_sensitivity
+    FROM physionet-data.eicu_crd.microlab ml
+    WHERE ml.patientunitstayid in ({icuids})
+    AND ml.culturetakenoffset >=0
+
+    """.format(icuids=','.join(icuids_to_keep))
+    microlab = gcp2df(query, fill_df)
+
+    microlab['hours_in'] = microlab['culturetakenoffset'].floordiv(60)
+    microlab.drop(columns=['culturetakenoffset'], inplace=True)
+    microlab.reset_index(inplace=True)
+    microlab = microlab.groupby(ID_COLS + ['hours_in']).agg(['last'])
+    microlab = microlab.reindex(fill_df.index)
+
+    query = """
+    SELECT gc.patientunitstayid	, gc.chartoffset, gc.gcs
+    FROM physionet-data.eicu_crd_derived.pivoted_gcs gc
+    WHERE gc.patientunitstayid in ({icuids})
+    and gc.chartoffset >=0
+
+    """.format(icuids=','.join(icuids_to_keep))
+    gcs = gcp2df(query)
+    gcs = fill_query(gcs, fill_df)
+
+    # uo weight cvp
+    query = """
+    SELECT uo.patientunitstayid, uo.chartoffset, uo.urineoutput
+    FROM physionet-data.eicu_crd_derived.pivoted_uo uo
+    WHERE uo.patientunitstayid in ({icuids})
+    and uo.chartoffset >=0
+
+    """.format(icuids=','.join(icuids_to_keep))
+    uo = gcp2df(query)
+    uo = fill_query(uo, fill_df)
+
+    # weight cvp
+    query = """
+    SELECT wg.patientunitstayid, wg.chartoffset, wg.weight
+    FROM physionet-data.eicu_crd_derived.pivoted_weight wg
+    WHERE wg.patientunitstayid in ({icuids})
+    and wg.chartoffset >=0
+
+    """.format(icuids=','.join(icuids_to_keep))
+    weight = gcp2df(query)
+    weight = fill_query(weight, fill_df)
+
+    # weight cvp
+    query = """
+    SELECT vp.patientunitstayid, vp.observationoffset, vp.cvp
+    FROM physionet-data.eicu_crd.vitalperiodic vp
+    WHERE vp.patientunitstayid in ({icuids})
+    and vp.observationoffset >=0
+    """.format(icuids=','.join(icuids_to_keep))
+    cvp = gcp2df(query)
+    cvp = fill_query(cvp, fill_df, time='observationoffset')
+
+    # concat all
+    vital = bg.join([lab, vital, gcs, uo, weight, cvp, microlab])
+
+    del bg, lab, gcs, uo, weight, cvp, microlab
+
+    # prepare some make up
+    # not perfect it affects percentage calculation
+    query = """
+    with vw0 as
+    (
+      select
+          patientunitstayid
+        , labname
+        , labresultoffset
+        , labresultrevisedoffset
+      from physionet-data.eicu_crd.lab
+      where labname in
+      ('urinary creatinine', 'magnesium',  'phosphate', "WBC's in urine", '24 h urine protein'
+      )
+      group by patientunitstayid, labname, labresultoffset, labresultrevisedoffset
+      having count(distinct labresult)<=1
+    )
+    -- get the last lab to be revised
+    , vw1 as
+    (
+      select
+          lab.patientunitstayid
+        , lab.labname
+        , lab.labresultoffset
+        , lab.labresultrevisedoffset
+        , lab.labresult
+        , ROW_NUMBER() OVER
+            (
+              PARTITION BY lab.patientunitstayid, lab.labname, lab.labresultoffset
+              ORDER BY lab.labresultrevisedoffset DESC
+            ) as rn
+      from physionet-data.eicu_crd.lab
+      inner join vw0
+        ON  lab.patientunitstayid = vw0.patientunitstayid
+        AND lab.labname = vw0.labname
+        AND lab.labresultoffset = vw0.labresultoffset
+        AND lab.labresultrevisedoffset = vw0.labresultrevisedoffset
+      -- only valid lab values
+      WHERE
+           (lab.labname = 'urinary creatinine' and lab.labresult > 0 and lab.labresult <= 650) -- based on mimic 
+        OR (lab.labname = 'magnesium' and lab.labresult > 0 and lab.labresult <= 22)
+        OR (lab.labname = 'phosphate' and lab.labresult > 0 and lab.labresult <= 22)
+        OR (lab.labname = "WBC's in urine" and lab.labresult > 0 and lab.labresult <= 750) -- based on mimic
+        OR (lab.labname = '24 h urine protein'and lab.labresult > 0) -- no need 
+    )
+    select
+        patientunitstayid
+      , labresultoffset as chartoffset
+      , MAX(case when labname = 'urinary creatinine' then labresult else null end) as urine_creat
+      , MAX(case when labname = 'magnesium' then labresult else null end) as magnesium
+      , MAX(case when labname = 'phosphate' then labresult else null end) as phosphate
+      , MAX(case when labname = "WBC's in urine" then labresult else null end) as wbc_urine
+      , MAX(case when labname = '24 h urine protein' then labresult else null end) as urine_prot
+    from vw1
+    where rn = 1
+    and patientunitstayid in ({icuids})
+    and labresultoffset >=0
+    group by patientunitstayid, labresultoffset
+    order by patientunitstayid, labresultoffset
+    """.format(icuids=','.join(icuids_to_keep))
+    labmakeup = gcp2df(query)
+    labmakeup = fill_query(labmakeup, fill_df)
+
+    query = """
+    SELECT rc.patientunitstayid, 
+            rc.respchartoffset as chartoffset, cast(rc.respchartvalue as FLOAT64) as tidal_vol_obs
+    FROM physionet-data.eicu_crd.respiratorycharting rc
+    WHERE rc.respchartvaluelabel = 'Tidal Volume Observed (VT)'
+    AND patientunitstayid in ({icuids})
+    AND respchartoffset >=0
+    """.format(icuids=','.join(icuids_to_keep))
+    tidal_vol_obs = gcp2df(query)
+    tidal_vol_obs = fill_query(tidal_vol_obs, fill_df)
+
+    vital = vital.join([labmakeup, tidal_vol_obs])
+    del labmakeup, tidal_vol_obs
+
+    idx = pd.IndexSlice
+    vital.loc[:, idx[:, 'count']] = vital.loc[:, idx[:, 'count']].fillna(0)
+
+    original = vital.loc[:, idx['ibp_systolic', ['mean', 'count']]].copy(deep=True)
+    makeups = vital.loc[:, idx['nibp_systolic', ['mean', 'count']]].copy(deep=True)
+    filled = combine_cols(makeups, original)
+    vital.loc[:, idx['ibp_systolic', ['mean', 'count']]] = filled.loc[:, ['mean', 'count']].values
+
+    original = vital.loc[:, idx['ibp_diastolic', ['mean', 'count']]].copy(deep=True)
+    makeups = vital.loc[:, idx['nibp_diastolic', ['mean', 'count']]].copy(deep=True)
+    filled = combine_cols(makeups, original)
+    vital.loc[:, idx['ibp_diastolic', ['mean', 'count']]] = filled.loc[:, ['mean', 'count']].values
+
+    original = vital.loc[:, idx['ibp_mean', ['mean', 'count']]].copy(deep=True)
+    makeups = vital.loc[:, idx['nibp_mean', ['mean', 'count']]].copy(deep=True)
+    filled = combine_cols(makeups, original)
+    vital.loc[:, idx['ibp_mean', ['mean', 'count']]] = filled.loc[:, ['mean', 'count']].values
+
+    # drop 'basedeficit' 124 + 5-->  122+4
+    vital.drop('basedeficit', axis=1, level=0, inplace=True)
+    vital.drop('index', axis=1, level=0, inplace=True)
+
+    vital = pd.get_dummies(vital)
+    # screen and positive culture needs impute, they are last columns but with float data type
+    vital[('positive', 'mask')] = (~vital[('positive', 'last')].isnull()).astype(float)
+    vital[('screen', 'mask')] = (~vital[('screen', 'last')].isnull()).astype(float)
+    vital[('has_sensitivity', 'mask')] = (~vital[('has_sensitivity', 'last')].isnull()).astype(float)
+
+    # make empty columns
+    columns_to_make = ['calcium_0', 'atypical_lymphocytes', 'immature_granulocytes', 'metamyelocytes', 'nrbc',
+                       'ntprobnp', 'bilirubin_direct', 'bilirubin_indirect', 'ggt', 'ld_ldh',
+                       'Peak inspiratory pressure', 'Plateau Pressure',
+                       'Positive end-expiratory pressure Set', 'Red blood cell count urine', 'pH urine']
+    for col in columns_to_make:
+        vital[(col, 'mean')] = fill_df.values
+        vital[(col, 'count')] = 0
+
+    # other columsn
+    empty_culture = ["('culturesite', 'last')_culturesite10", "('culturesite', 'last')_culturesite5",
+                     "('culturesite', 'last')_culturesite6", "('culturesite', 'last')_culturesite7"]
+    for col in empty_culture:
+        vital[col] = 0
+
+    # organize columns
+    # combine glucose_1 to glucose in mimic, very similair to glucose
+    # combine blood urea nitrogen to bun # remember means and stds
+    # drop abs cells
+    # concate with makeup columns
+    # col = X_encode.columns.tolist()
+    # 138 = 61*2 + 6 + 10
+    col = ['spo2', 'pao2', 'paco2', 'fio2', 'pH', 'baseexcess',
+           'bicarbonate', 'TotalCO2', 'hematocrit', 'hemoglobin', 'chloride', 'calcium_0',
+           'temperature', 'potassium', 'sodium', 'lactate', 'glucose', 'heartrate',
+           'ibp_systolic', 'ibp_diastolic', 'ibp_mean', 'nibp_systolic', 'nibp_diastolic', 'nibp_mean',
+           'RespiratoryRate', 'wbc', 'basos', 'eos', 'lymphs', 'monos', 'polys',
+           'atypical_lymphocytes', 'bands', 'immature_granulocytes', 'metamyelocytes', 'nrbc',
+           'troponin_t', 'cpk_mb', 'ntprobnp', 'albumin', 'total_protein', 'aniongap',
+           'BUN', 'calcium', 'creatinine', 'fibrinogen', 'INR', 'pt', 'ptt', 'mch',
+           'mchc', 'mcv', 'platelets', 'rbc', 'rdw', 'alt', 'alp', 'ast', 'amylase', 'bilirubin',
+           'bilirubin_direct', 'bilirubin_indirect', 'cpk', 'ggt', 'ld_ldh', 'gcs', 'crp',
+           'weight', 'urineoutput', 'cvp', 'urine_creat', 'magnesium', 'Peak inspiratory pressure',
+           'phosphate', 'Plateau Pressure', 'peep', 'Positive end-expiratory pressure Set',
+           'Red blood cell count urine',
+           'tidal_vol_obs', 'urine_prot', 'wbc_urine', 'pH urine', 'positive',
+           'screen', 'has_sensitivity',
+           "('culturesite', 'last')_culturesite0", "('culturesite', 'last')_culturesite1",
+           "('culturesite', 'last')_culturesite10",
+           "('culturesite', 'last')_culturesite11",
+           "('culturesite', 'last')_culturesite12", "('culturesite', 'last')_culturesite13",
+           "('culturesite', 'last')_culturesite2", "('culturesite', 'last')_culturesite3",
+           "('culturesite', 'last')_culturesite4",
+           "('culturesite', 'last')_culturesite5", "('culturesite', 'last')_culturesite6",
+           "('culturesite', 'last')_culturesite7",
+           "('culturesite', 'last')_culturesite8", "('culturesite', 'last')_culturesite9"]
+
+    # generate final col
+    breakpoint1 = col.index('positive')
+    breakpoint2 = col.index("('culturesite', 'last')_culturesite0")
+    col_ready = []
+    for i in range(breakpoint1):
+        col_ready.append((col[i], 'mean'))
+        col_ready.append((col[i], 'count'))
+    for i in range(breakpoint1, breakpoint2):
+        col_ready.append((col[i], 'last'))
+        col_ready.append((col[i], 'mask'))
+    for i in range(breakpoint2, len(col)):
+        col_ready.append(col[i])
+
+    vital = vital[col_ready]
+
+    # Intervention table
+    query = \
+        """
+        with 
+        ventall as
+        (
+            SELECT Distinct i.patientunitstayid, i.priorventstartoffset, i.priorventendoffset	
+            From physionet-data.eicu_crd.respiratorycare i
+            WHERE i.priorventstartoffset >0 or i.priorventendoffset	>0
+            Order by patientunitstayid
+        )
+    
+        SELECT vt.patientunitstayid, FLOOR(GREATEST(vt.priorventstartoffset, 0)/60) as starttime, 
+            FLOOR(LEAST(vt.priorventendoffset, i.unitdischargeoffset)/60) as endtime,
+           FLOOR((i.unitdischargeoffset - i.unitadmitoffset)/60) as max_hours
+        FROM ventall vt
+        INNER JOIN physionet-data.eicu_crd_derived.icustay_detail i ON i.patientunitstayid = vt.patientunitstayid
+        WHERE  vt.priorventstartoffset is not null 
+        AND vt.priorventendoffset is not null
+        AND vt.patientunitstayid in ({icuids})
+        """.format(icuids=','.join(icuids_to_keep))
+    vent = gcp2df(query)
+
+    vent_data = process_inv(vent, 'vent')
+    ids_with = vent_data['patientunitstayid']
+    ids_with = set(map(int, ids_with))
+    ids_all = set(map(int, icuids_to_keep))
+    ids_without = (ids_all - ids_with)
+
+    # patient.set_index('patientunitstayid', inplace=True)
+    icustay_timediff_tmp = patient['unitdischargeoffset'] - patient['unitadmitoffset']
+    icustay_timediff = pd.Series([timediff // 60
+                                  for timediff in icustay_timediff_tmp], index=patient.index.values)
+    # Create a new fake dataframe with blanks on all vent entries
+    out_data = fill_df.copy(deep=True)
+    out_data = out_data.reset_index()
+    out_data = out_data.set_index('patientunitstayid')
+    out_data = out_data.iloc[out_data.index.isin(ids_without)]
+    out_data = out_data.reset_index()
+    out_data = out_data[['patientunitstayid']]
+    out_data['max_hours'] = out_data['patientunitstayid'].map(icustay_timediff)
+
+    # Create all 0 column for vent
+    out_data = out_data.groupby('patientunitstayid')
+    out_data = out_data.apply(add_blank_indicators_e)
+    out_data.rename(columns={'on': 'vent'}, inplace=True)
+
+    out_data = out_data.reset_index()
+    intervention = pd.concat([vent_data[['patientunitstayid', 'hours_in', 'vent']],
+                              out_data[['patientunitstayid', 'hours_in', 'vent']]],
+                             axis=0)
+
+    # pivoted_med
+    column_names = ['dopamine', 'epinephrine', 'norepinephrine', 'phenylephrine', 'vasopressin', 'dobutamine',
+                    'milrinone', 'heparin']
+
+    for c in column_names:
+        query = \
+            """
+            SELECT pm.patientunitstayid, FLOOR(GREATEST(pm.drugorderoffset, 0)/60) as starttime, FLOOR(LEAST(pm.drugstopoffset, i.unitdischargeoffset)/60) as endtime, 
+                pm.{drug_name}, 
+                FLOOR((i.unitdischargeoffset - i.unitadmitoffset)/60) as max_hours
+            FROM physionet-data.eicu_crd_derived.pivoted_med pm
+            INNER JOIN physionet-data.eicu_crd_derived.icustay_detail i ON i.patientunitstayid = pm.patientunitstayid
+            WHERE pm.{drug_name} = 1 
+            AND pm.patientunitstayid in ({icuids}) 
+            AND pm.drugorderoffset is not null 
+            AND pm.drugstopoffset is not null
+            """.format(drug_name=c, icuids=','.join(icuids_to_keep))
+        med = gcp2df(query)
+        # 'epinephrine',  'dopamine', 'norepinephrine', 'phenylephrine', \
+        #    'vasopressin', 'dobutamine', 'milrinone',  'heparin',
+        med = process_inv(med, c)
+        intervention = intervention.merge(
+            med[['patientunitstayid', 'hours_in', c]],
+            on=['patientunitstayid', 'hours_in'],
+            how='left'
+        )
+
+    # antibiotics
+    query = \
+        """
+        SELECT md.patientunitstayid, FLOOR(GREATEST(md.drugstartoffset, 0)/60) as starttime
+            , FLOOR(LEAST(md.drugstopoffset, i.unitdischargeoffset)/60) as endtime
+            , FLOOR((i.unitdischargeoffset - i.unitadmitoffset)/60) as max_hours
+        FROM physionet-data.eicu_crd.medication md
+        INNER JOIN physionet-data.eicu_crd_derived.icustay_detail i ON i.patientunitstayid = md.patientunitstayid
+        WHERE (REGEXP_CONTAINS(lower(drugname), r"^.*adoxa.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ala-tet.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*alodox.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*amikacin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*amikin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*amoxicill.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*amphotericin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*anidulafungin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ancef.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*clavulanate.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ampicillin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*augmentin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*avelox.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*avidoxy.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*azactam.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*azithromycin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*aztreonam.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*axetil.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*bactocill.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*bactrim.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*bactroban.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*bethkis.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*biaxin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*bicillin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cayston.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefazolin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cedax.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefoxitin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ceftazidime.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefaclor.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefadroxil.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefdinir.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefditoren.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefepime.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefotan.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefotetan.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefotaxime.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ceftaroline.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefpodoxime.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefpirome.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefprozil.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ceftibuten.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ceftin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ceftriaxone.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cefuroxime.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cephalexin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cephalothin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cephapririn.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*chloramphenicol.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cipro.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ciprofloxacin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*claforan.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*clarithromycin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cleocin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*clindamycin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*cubicin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*dicloxacillin.*$") 
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*dirithromycin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*doryx.*$") 
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*doxycy.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*duricef.*$") 
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*dynacin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ery-tab.*$") 
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*eryped.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*eryc.*$") 
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*erythrocin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*erythromycin.*$") 
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*factive.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*flagyl.*$") 
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*fortaz.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*furadantin.*$") 
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*garamycin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*gentamicin.*$") 
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*kanamycin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*keflex.*$") 
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*kefzol.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ketek.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*levaquin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*levofloxacin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*lincocin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*linezolid.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*macrobid.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*macrodantin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*maxipime.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*mefoxin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*metronidazole.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*meropenem.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*methicillin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*minocin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*minocycline.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*monodox.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*monurol.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*morgidox.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*moxatag.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*moxifloxacin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*mupirocin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*myrac.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*nafcillin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*neomycin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*nicazel doxy 30.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*nitrofurantoin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*norfloxacin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*noroxin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ocudox.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*ofloxacin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*omnicef.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*oracea.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*oraxyl.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*oxacillin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*pc pen vk.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*pce dispertab.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*panixine.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*pediazole.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*penicillin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*periostat.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*pfizerpen.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*piperacillin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*tazobactam.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*primsol.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*proquin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*raniclor.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*rifadin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*rifampin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*rocephin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*smz-tmp.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*septra.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*septra ds.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*septra.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*solodyn.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*spectracef.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*streptomycin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*sulfadiazine.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*sulfamethoxazole.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*trimethoprim.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*sulfatrim.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*sulfisoxazole.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*suprax.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*synercid.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*tazicef.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*tetracycline.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*timentin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*tobramycin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*trimethoprim.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*unasyn.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*vancocin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*vancomycin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*vantin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*vibativ.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*vibra-tabs.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*vibramycin.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*zinacef.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*zithromax.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*zosyn.*$")
+          OR REGEXP_CONTAINS(lower(drugname), r"^.*zyvox.*$")
+          )
+        AND md.drugordercancelled = 'No'
+        AND md.patientunitstayid in ({icuids}) 
+        AND md.drugstartoffset is not null 
+        AND md.drugstopoffset is not null
+        """.format(icuids=','.join(icuids_to_keep))
+
+    anti = gcp2df(query)
+
+    anti = process_inv(anti, 'antib')
+    intervention = intervention.merge(
+        anti[['patientunitstayid', 'hours_in', 'antib']],
+        on=['patientunitstayid', 'hours_in'],
+        how='left'
+    )
+
+    ## crrt
+    query = \
+        """
+        SELECT io.patientunitstayid, FLOOR(GREATEST(MIN(io.intakeoutputoffset), 0)/60) as starttime
+            , FLOOR(LEAST(MAX(io.intakeoutputoffset), MIN(i.unitdischargeoffset))/60) as endtime
+            , FLOOR((MIN(i.unitdischargeoffset) - MIN(i.unitadmitoffset))/60) as max_hours
+        FROM physionet-data.eicu_crd.intakeoutput io
+        INNER JOIN physionet-data.eicu_crd_derived.icustay_detail i ON i.patientunitstayid = io.patientunitstayid
+        WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*crrt.*$")
+        AND io.patientunitstayid in ({icuids}) 
+        GROUP BY io.patientunitstayid
+        """.format(icuids=','.join(icuids_to_keep))
+    crrt = gcp2df(query)
+
+    crrt = process_inv(crrt, 'crrt')
+    intervention = intervention.merge(
+        crrt[['patientunitstayid', 'hours_in', 'crrt']],
+        on=['patientunitstayid', 'hours_in'],
+        how='left'
+    )
+
+    ##  rbc transfusion
+    query = \
+        """
+        SELECT io.patientunitstayid, FLOOR(GREATEST(MIN(io.intakeoutputoffset), 0)/60) as starttime
+            , FLOOR(LEAST(MAX(io.intakeoutputoffset), MIN(i.unitdischargeoffset))/60) as endtime
+            , FLOOR((MIN(i.unitdischargeoffset) - MIN(i.unitadmitoffset))/60) as max_hours
+        FROM physionet-data.eicu_crd.intakeoutput io
+        INNER JOIN physionet-data.eicu_crd_derived.icustay_detail i ON i.patientunitstayid = io.patientunitstayid
+        WHERE (REGEXP_CONTAINS(lower(cellpath), r"^.*rbc.*$")
+        OR REGEXP_CONTAINS(lower(cellpath), r"^.*red blood cell.*$"))
+        AND io.patientunitstayid in ({icuids}) 
+        GROUP BY io.patientunitstayid
+        """.format(icuids=','.join(icuids_to_keep))
+    rbc = gcp2df(query)
+
+    rbc = process_inv(rbc, 'rbc')
+    intervention = intervention.merge(
+        rbc[['patientunitstayid', 'hours_in', 'rbc']],
+        on=['patientunitstayid', 'hours_in'],
+        how='left'
+    )
+
+    ##  ffp transfusion
+    query = \
+        """
+        SELECT io.patientunitstayid, FLOOR(GREATEST(MIN(io.intakeoutputoffset), 0)/60) as starttime
+            , FLOOR(LEAST(MAX(io.intakeoutputoffset), MIN(i.unitdischargeoffset))/60) as endtime
+            , FLOOR((MIN(i.unitdischargeoffset) - MIN(i.unitadmitoffset))/60) as max_hours
+        FROM physionet-data.eicu_crd.intakeoutput io
+        INNER JOIN physionet-data.eicu_crd_derived.icustay_detail i ON i.patientunitstayid = io.patientunitstayid
+        WHERE (REGEXP_CONTAINS(lower(cellpath), r"^.*plasma.*$")
+        OR REGEXP_CONTAINS(lower(cellpath), r"^.*ffp.*$"))
+        AND io.patientunitstayid in ({icuids}) 
+        GROUP BY io.patientunitstayid
+        """.format(icuids=','.join(icuids_to_keep))
+    ffp = gcp2df(query)
+    ffp = process_inv(ffp, 'ffp')
+    intervention = intervention.merge(
+        ffp[['patientunitstayid', 'hours_in', 'ffp']],
+        on=['patientunitstayid', 'hours_in'],
+        how='left'
+    )
+
+    ##  platelets transfusion
+    query = \
+        """
+        SELECT io.patientunitstayid, FLOOR(GREATEST(MIN(io.intakeoutputoffset), 0)/60) as starttime
+            , FLOOR(LEAST(MAX(io.intakeoutputoffset), MIN(i.unitdischargeoffset))/60) as endtime
+            , FLOOR((MIN(i.unitdischargeoffset) - MIN(i.unitadmitoffset))/60) as max_hours
+        FROM physionet-data.eicu_crd.intakeoutput io
+        INNER JOIN physionet-data.eicu_crd_derived.icustay_detail i ON i.patientunitstayid = io.patientunitstayid
+        WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*platelet.*$")
+        AND io.patientunitstayid in ({icuids}) 
+        GROUP BY io.patientunitstayid
+        """.format(icuids=','.join(icuids_to_keep))
+    platelets = gcp2df(query)
+
+    platelets = process_inv(platelets, 'platelets')
+    intervention = intervention.merge(
+        platelets[['patientunitstayid', 'hours_in', 'platelets']],
+        on=['patientunitstayid', 'hours_in'],
+        how='left'
+    )
+
+    ##
+    query = \
+        """
+        SELECT io.patientunitstayid, FLOOR(GREATEST(MIN(io.intakeoutputoffset), 0)/60) as starttime
+            , FLOOR(LEAST(MAX(io.intakeoutputoffset), MIN(i.unitdischargeoffset))/60) as endtime
+            , FLOOR((MIN(i.unitdischargeoffset) - MIN(i.unitadmitoffset))/60) as max_hours
+        FROM physionet-data.eicu_crd.intakeoutput io
+        INNER JOIN physionet-data.eicu_crd_derived.icustay_detail i ON i.patientunitstayid = io.patientunitstayid
+        WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*colloid.*$")
+        AND io.patientunitstayid in ({icuids}) 
+        GROUP BY io.patientunitstayid
+        """.format(icuids=','.join(icuids_to_keep))
+    colloid = gcp2df(query)
+    colloid = process_inv(colloid, 'colloid')
+    intervention = intervention.merge(
+        colloid[['patientunitstayid', 'hours_in', 'colloid']],
+        on=['patientunitstayid', 'hours_in'],
+        how='left'
+    )
+
+    query = \
+        """
+        SELECT io.patientunitstayid, FLOOR(GREATEST(MIN(io.intakeoutputoffset), 0)/60) as starttime
+            , FLOOR(LEAST(MAX(io.intakeoutputoffset), MIN(i.unitdischargeoffset))/60) as endtime
+            , FLOOR((MIN(i.unitdischargeoffset) - MIN(i.unitadmitoffset))/60) as max_hours
+        FROM physionet-data.eicu_crd.intakeoutput io
+        INNER JOIN physionet-data.eicu_crd_derived.icustay_detail i ON i.patientunitstayid = io.patientunitstayid
+        WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*crystalloid.*$")
+        AND io.patientunitstayid in ({icuids}) 
+        GROUP BY io.patientunitstayid
+        """.format(icuids=','.join(icuids_to_keep))
+    crystalloid = gcp2df(query)
+    crystalloid = process_inv(crystalloid, 'crystalloid')
+    intervention = intervention.merge(
+        crystalloid[['patientunitstayid', 'hours_in', 'crystalloid']],
+        on=['patientunitstayid', 'hours_in'],
+        how='left'
+    )
+
+    # for each column, astype to int and fill na with 0
+    intervention = intervention.fillna(0)
+    for i in range(3, 18):
+        intervention.iloc[:, i] = intervention.iloc[:, i].astype(int)
+
+    intervention.set_index(ID_COLS + ['hours_in'], inplace=True)
+    intervention.sort_index(level=['patientunitstayid', 'hours_in'], inplace=True)
+
+    new_col = ['vent', 'antib', 'dopamine', 'epinephrine', 'norepinephrine', 'phenylephrine',
+               'vasopressin', 'dobutamine', 'milrinone', 'heparin', 'crrt',
+               'rbc', 'platelets', 'ffp', 'colloid', 'crystalloid']
+    intervention = intervention.loc[:, new_col]
+    # static query
+    # commo
+    query = \
+        """
+        SELECT ad.patientunitstayid
+    
+            -- Myocardial infarction
+            , MAX(CASE WHEN
+                SUBSTR(ad.icd9code, 1, 3) IN ('410','412')
+                THEN 1 
+                ELSE 0 END) AS myocardial_infarct
+    
+            -- Congestive heart failure
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) = '428'
+                OR
+                SUBSTR(ad.icd9code, 1, 6) IN ('398.91','402.01','402.11','402.91','404.01','404.03',
+                                '404.11','404.13','404.91','404.93')
+                OR 
+                SUBSTR(ad.icd9code, 1, 5) BETWEEN '425.4' AND '425.9'
+                THEN 1 
+                ELSE 0 END) AS congestive_heart_failure
+    
+            -- Peripheral vascular disease
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) IN ('440','441')
+                OR
+                SUBSTR(ad.icd9code, 1, 5) IN ('093.0','437.3','4471.','557.1','557.9','V43.4')
+                OR
+                SUBSTR(ad.icd9code, 1, 5) BETWEEN '443.1' AND '443.9'
+                THEN 1 
+                ELSE 0 END) AS peripheral_vascular_disease
+    
+            -- Cerebrovascular disease
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) BETWEEN '430' AND '438'
+                OR
+                SUBSTR(ad.icd9code, 1, 6) = '362.34'
+                THEN 1 
+                ELSE 0 END) AS cerebrovascular_disease
+    
+            -- Dementia
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) = '290'
+                OR
+                SUBSTR(ad.icd9code, 1, 5) IN ('294.1','331.2')
+                THEN 1 
+                ELSE 0 END) AS dementia
+    
+            -- Chronic pulmonary disease
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) BETWEEN '490' AND '505'
+                OR
+                SUBSTR(ad.icd9code, 1, 5) IN ('416.8','416.9','506.4','508.1','508.8')
+                THEN 1 
+                ELSE 0 END) AS chronic_pulmonary_disease
+    
+            -- Rheumatic disease
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) = '725'
+                OR
+                SUBSTR(ad.icd9code, 1, 5) IN ('446.5','710.0','710.1','710.2','710.3',
+                                                        '710.4','714.0','714.1','714.2','714.8')
+                THEN 1 
+                ELSE 0 END) AS rheumatic_disease
+    
+            -- Peptic ulcer disease
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) IN ('531','532','533','534')
+                THEN 1 
+                ELSE 0 END) AS peptic_ulcer_disease
+    
+            -- Mild liver disease
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) IN ('570','571')
+                OR
+                SUBSTR(ad.icd9code, 1, 5) IN ('070.6','070.9','573.3','573.4','573.8','573.9','V42.7')
+                OR
+                SUBSTR(ad.icd9code, 1, 6) IN ('070.22','070.23','070.32','070.33','070.44','070.54')
+                THEN 1 
+                ELSE 0 END) AS mild_liver_disease
+    
+            -- Diabetes without chronic complication
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 5) IN ('250.0','250.1','250.2','250.3','250.8','250.9') 
+                THEN 1 
+                ELSE 0 END) AS diabetes_without_cc
+    
+            -- Diabetes with chronic complication
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 5) IN ('250.4','250.5','250.6','250.7')
+                THEN 1 
+                ELSE 0 END) AS diabetes_with_cc
+    
+            -- Hemiplegia or paraplegia
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) IN ('342','343')
+                OR
+                SUBSTR(ad.icd9code, 1, 5) IN ('334.1','344.0','344.1','344.2',
+                                                        '344.3','344.4','344.5','344.6','344.9')
+                THEN 1 
+                ELSE 0 END) AS paraplegia
+    
+            -- Renal disease
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) IN ('582','585','586','V56')     
+                OR
+                SUBSTR(ad.icd9code, 1, 5) IN ('588.0','V42.0','V45.1')  
+                OR
+                SUBSTR(ad.icd9code, 1, 5) IN ('583.0', '583.1','583.2','583.3','583.4','583.5', '583.6','583.7')
+                OR
+                SUBSTR(ad.icd9code, 1, 6) IN ('403.01','403.11','403.91','404.02','404.03','404.12','404.13','404.92','404.93')  
+                THEN 1 
+                ELSE 0 END) AS renal_disease
+    
+            -- Any malignancy, including lymphoma and leukemia, except malignant neoplasm of skin
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) BETWEEN '140' AND '172'
+                OR
+                SUBSTR(ad.icd9code, 1, 5) BETWEEN '174.0' AND '195.8'
+                OR
+                SUBSTR(ad.icd9code, 1, 3) BETWEEN '200' AND '208'
+                OR
+                SUBSTR(ad.icd9code, 1, 5) = '238.6'
+                THEN 1 
+                ELSE 0 END) AS malignant_cancer
+    
+            -- Moderate or severe liver disease
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 5) IN ('456.0','456.1','456.2')
+                OR
+                SUBSTR(ad.icd9code, 1, 5) BETWEEN '572.2' AND '572.8'
+                THEN 1 
+                ELSE 0 END) AS severe_liver_disease
+    
+            -- Metastatic solid tumor
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) IN ('196','197','198','199')
+                THEN 1 
+                ELSE 0 END) AS metastatic_solid_tumor
+    
+            -- AIDS/HIV
+            , MAX(CASE WHEN 
+                SUBSTR(ad.icd9code, 1, 3) IN ('042','043','044')
+                THEN 1 
+                ELSE 0 END) AS aids
+    
+        FROM physionet-data.eicu_crd.diagnosis ad
+        WHERE ad.patientunitstayid in ({icuids})
+        GROUP BY ad.patientunitstayid
+        ;
+        """.format(icuids=','.join(icuids_to_keep))
+    commo = gcp2df(query)
+    commo.set_index('patientunitstayid', inplace=True)
+    static = patient.join(commo)
+    static_col = static.columns.tolist()
+    static_col.remove('hospitalid')
+    static_col.append('hospitalid')
+    static = static[static_col]
+
+    intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_inv.h5'), key='eicu_inv')
+    static.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_static.h5'), key='eicu_static')
+    vital.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_vital.h5'), key='eicu_vital')
+
+    total_cols = vital.columns.tolist()
+    
+
+
+
+
+
+
+
     return

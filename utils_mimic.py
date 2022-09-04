@@ -171,7 +171,6 @@ def add_antibitics_indicators(out_gb):
     return pd.DataFrame({'subject_id': subject_id, 'hadm_id': hadm_id,
                          'hours_in': hours, 'antibiotic': values, 'route': route})  # icustay_id': icustay_id})
 
-
 def add_blank_indicators(out_gb):
     """
     Function to add blank indicator for stays with no ventilation records
@@ -217,3 +216,56 @@ def remove_outliers_l(X, X_or, col, range):
     X.loc[:, [(col, 'mean')]] = X.loc[:, [(col, 'mean')]].mask((X_or.loc[:, [(col, 'mean')]] < range).values)
     X.loc[:, [(col, 'count')]] = X.loc[:, [(col, 'count')]].mask((X_or.loc[:, [(col, 'mean')]] < range).values, other=0.0)
     return
+
+def fill_query(df, fill_df, time='chartoffset'):
+    df['hours_in'] = df[time].floordiv(60)
+    df.drop(columns=[time], inplace=True)
+    df.set_index(ID_COLS + ['hours_in'], inplace=True)
+    df.reset_index(inplace=True)
+    # level_to_change = 1
+    df = df.groupby(ID_COLS + ['hours_in']).agg(['mean', 'count'])
+    # df.index = df.index.set_levels(df.index.levels[level_to_change].astype(int), level=level_to_change)
+    df = df.reindex(fill_df.index)
+    return df
+
+def add_outcome_indicators_e(out_gb):
+    # patientunitstayid = out_gb['patientunitstayid'].unique()[0]
+    max_hrs = out_gb['max_hours'].unique()[0]
+    on_hrs = set()
+    # on_values = []
+
+    p_set = on_hrs.copy()
+    for index, row in out_gb.iterrows():
+        on_hrs.update(range(row['starttime'], row['endtime'] + 1))
+        # if on_hrs - p_set:
+        # only when sets updates, append a value
+            # on_values.append([row['values']]*len(on_hrs - p_set))
+        # p_set = on_hrs.copy()
+
+    off_hrs = set(range(max_hrs + 1)) - on_hrs
+    ##values flatten a nested list
+    # values = [0]*len(off_hrs) + [item for sublist in on_values for item in sublist]
+    on_vals = [0]*len(off_hrs) + [1]*len(on_hrs)
+    hours = list(off_hrs) + list(on_hrs)
+    return pd.DataFrame({
+                        'hours_in':hours, 'on':on_vals}) #icustay_id': icustay_id})
+
+def add_blank_indicators_e(out_gb):
+    # subject_id = out_gb['subject_id'].unique()[0]
+    # hadm_id = out_gb['hadm_id'].unique()[0]
+    #icustay_id = out_gb['icustay_id'].unique()[0]
+    max_hrs = out_gb['max_hours'].unique()[0]
+
+    hrs = range(max_hrs + 1)
+    vals = list([0]*len(hrs))
+    return pd.DataFrame({
+                        'hours_in':hrs, 'on':vals})#'icustay_id': icustay_id,
+
+def process_inv(df, name):
+    df.starttime = df.starttime.astype(int)
+    df.endtime = df.endtime.astype(int)
+    df.max_hours = df.max_hours.astype(int)
+    df = df.groupby(['patientunitstayid']).apply(add_outcome_indicators_e)
+    df.rename(columns={'on': name}, inplace=True)
+    df = df.reset_index()
+    return df

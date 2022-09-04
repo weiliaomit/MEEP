@@ -11,6 +11,8 @@ if __name__ == '__main__':
                         help='Where to stop the pipeline')
     parser.add_argument("--patient_group", type=str, default='Generic', choices=['Generic', 'sepsis-3', 'ARF', 'shock', 'COPD', 'CHF'],
                         help='Specific groups to extract')
+    parser.add_argument("--custom_id", action='store_true', default=False, help="Whether use custom stay ids")
+    parser.add_argument('--customid_dir', required='--custom_id' in sys.argv, help="Specify custom id dir")
     parser.add_argument("--project_id", type=str, default='lucid-inquiry-337016',
                         help='Specify the Bigquery billing project')
     parser.add_argument("--output_dir", type=str, default='./output')
