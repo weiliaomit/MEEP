@@ -24,54 +24,170 @@ def extract_mimic(args):
     # datatime format to hour
     to_hours = lambda x: max(0, x.days * 24 + x.seconds // 3600)
 
-    # define our patient cohort by age, icu stay time
-    query = \
-        """
-        SELECT DISTINCT
-            i.subject_id,
-            i.hadm_id,
-            i.stay_id,
-            i.gender,
-            i.admission_age as age,
-            i.ethnicity,
-            i.hospital_expire_flag,
-            i.hospstay_seq,
-            i.los_icu,
-            i.admittime,
-            i.dischtime,
-            i.icu_intime,
-            i.icu_outtime,
-            a.admission_type,
-            a.insurance,
-            a.deathtime,
-            a.discharge_location,
-            CASE when a.deathtime between i.icu_intime and i.icu_outtime THEN 1 ELSE 0 END AS mort_icu,
-            CASE when a.deathtime between i.admittime and i.dischtime THEN 1 ELSE 0 END AS mort_hosp,
-            COALESCE(f.readmission_30, 0) AS readmission_30
-        FROM physionet-data.mimic_derived.icustay_detail i
-            INNER JOIN physionet-data.mimic_core.admissions a ON i.hadm_id = a.hadm_id
-            INNER JOIN physionet-data.mimic_icu.icustays s ON i.stay_id = s.stay_id
-            LEFT OUTER JOIN (SELECT d.stay_id, 1 as readmission_30
-                        FROM physionet-data.mimic_icu.icustays c, physionet-data.mimic_icu.icustays d
-                        WHERE c.subject_id=d.subject_id
-                        AND c.stay_id > d.stay_id
-                        AND c.intime - d.outtime <= INTERVAL 30 DAY
-                        AND c.outtime = (SELECT MIN(e.outtime) from physionet-data.mimic_icu.icustays e 
-                                        WHERE e.subject_id=c.subject_id
-                                        AND e.intime>d.outtime) ) f
-                        ON i.stay_id=f.stay_id
-        WHERE i.hadm_id is not null and i.stay_id is not null
-            and i.hospstay_seq = 1
-            and i.icustay_seq = 1
-            and i.admission_age >= {min_age}
-            and (i.icu_outtime >= (i.icu_intime + INTERVAL {min_los} Hour))
-            and (i.icu_outtime <= (i.icu_intime + INTERVAL {max_los} Hour))
-        ORDER BY subject_id
-        ;
-        """.format(min_age=args.age_min, min_los=args.los_min, max_los=args.los_max)
+    def get_group_id(args):
+        if args.patient_group == 'sepsis-3':
+            query = \
+                """
+                SELECT  stay_id
+                FROM physionet-data.mimic_derived.sepsis3
+                """
+            id_df = gcp2df(query)
+            group_stay_ids = set([str(s) for s in id_df['stay_id']])
+        elif args.patient_group == 'ARF':
+            query = \
+                """
+                SELECT DISTINCT stay_id
+                FROM physionet-data.mimic_icu.chartevents
+                WHERE itemid = 224700 or  itemid = 220339
 
-    patient = gcp2df(query)
-    # TODO add special group filtering
+                UNION ALL
+
+                SELECT i.stay_id
+                FROM physionet-data.mimic_hosp.labevents l
+                LEFT JOIN physionet-data.mimic_icu.icustays i on l.subject_id = i.subject_id 
+                WHERE l.itemid = 50819 
+                AND l.charttime between i.intime and i.outtime 
+
+                UNION ALL 
+
+                SELECT DISTINCT v.stay_id 
+                FROM physionet-data.mimic_derived.ventilation v
+                """
+            id_df = gcp2df(query)
+            group_stay_ids = set([str(s) for s in id_df['stay_id']])
+        elif args.patient_group == 'Shock':
+            query = \
+                """
+                SELECT DISTINCT stay_id
+                FROM physionet-data.mimic_derived.vasoactive_agent
+                WHERE norepinephrine is not null 
+                OR epinephrine is not null 
+                OR dopamine is not null 
+                OR vasopressin is not null 
+                OR phenylephrine  is not null 
+                """
+            id_df = gcp2df(query)
+            group_stay_ids = set([str(s) for s in id_df['stay_id']])
+        elif args.patient_group == 'CHF':
+            query = \
+                """
+                SELECT DISTINCT i.stay_id
+                FROM physionet-data.mimic_derived.charlson c
+                LEFT JOIN physionet-data.mimic_icu.icustays i on c.hadm_id = i.hadm_id 
+                WHERE c.congestive_heart_failure = 1 and i.stay_id is not null
+                """
+            id_df = gcp2df(query)
+            group_stay_ids = set([str(s) for s in id_df['stay_id']])
+        elif args.patient_group == 'COPD':
+            query = \
+                """
+                SELECT DISTINCT i.stay_id
+                FROM physionet-data.mimic_derived.charlson c
+                LEFT JOIN physionet-data.mimic_icu.icustays i on c.hadm_id = i.hadm_id 
+                WHERE c.chronic_pulmonary_disease = 1 and i.stay_id is not null
+                """
+            id_df = gcp2df(query)
+            group_stay_ids = set([str(s) for s in id_df['stay_id']])
+        # elif args.custom_id == True:
+
+        return group_stay_ids
+
+
+    # define our patient cohort by age, icu stay time
+    if args.patient_group != 'Generic':
+        query = \
+            """
+            SELECT DISTINCT
+                i.subject_id,
+                i.hadm_id,
+                i.stay_id,
+                i.gender,
+                i.admission_age as age,
+                i.ethnicity,
+                i.hospital_expire_flag,
+                i.hospstay_seq,
+                i.los_icu,
+                i.admittime,
+                i.dischtime,
+                i.icu_intime,
+                i.icu_outtime,
+                a.admission_type,
+                a.insurance,
+                a.deathtime,
+                a.discharge_location,
+                CASE when a.deathtime between i.icu_intime and i.icu_outtime THEN 1 ELSE 0 END AS mort_icu,
+                CASE when a.deathtime between i.admittime and i.dischtime THEN 1 ELSE 0 END AS mort_hosp,
+                COALESCE(f.readmission_30, 0) AS readmission_30
+            FROM physionet-data.mimic_derived.icustay_detail i
+                INNER JOIN physionet-data.mimic_core.admissions a ON i.hadm_id = a.hadm_id
+                INNER JOIN physionet-data.mimic_icu.icustays s ON i.stay_id = s.stay_id
+                LEFT OUTER JOIN (SELECT d.stay_id, 1 as readmission_30
+                            FROM physionet-data.mimic_icu.icustays c, physionet-data.mimic_icu.icustays d
+                            WHERE c.subject_id=d.subject_id
+                            AND c.stay_id > d.stay_id
+                            AND c.intime - d.outtime <= INTERVAL 30 DAY
+                            AND c.outtime = (SELECT MIN(e.outtime) from physionet-data.mimic_icu.icustays e 
+                                            WHERE e.subject_id=c.subject_id
+                                            AND e.intime>d.outtime) ) f
+                            ON i.stay_id=f.stay_id
+            WHERE i.hadm_id is not null and i.stay_id is not null and i.stay_id in ({group_icuids})
+                and i.hospstay_seq = 1
+                and i.icustay_seq = 1
+                and i.admission_age >= {min_age}
+                and (i.icu_outtime >= (i.icu_intime + INTERVAL {min_los} Hour))
+                and (i.icu_outtime <= (i.icu_intime + INTERVAL {max_los} Hour))
+            ORDER BY subject_id
+            ;
+            """.format(group_icuids=','.join(get_group_id(args)), min_age=args.age_min, min_los=args.los_min, max_los=args.los_max)
+        patient = gcp2df(query)
+    else:
+        query = \
+            """
+            SELECT DISTINCT
+                i.subject_id,
+                i.hadm_id,
+                i.stay_id,
+                i.gender,
+                i.admission_age as age,
+                i.ethnicity,
+                i.hospital_expire_flag,
+                i.hospstay_seq,
+                i.los_icu,
+                i.admittime,
+                i.dischtime,
+                i.icu_intime,
+                i.icu_outtime,
+                a.admission_type,
+                a.insurance,
+                a.deathtime,
+                a.discharge_location,
+                CASE when a.deathtime between i.icu_intime and i.icu_outtime THEN 1 ELSE 0 END AS mort_icu,
+                CASE when a.deathtime between i.admittime and i.dischtime THEN 1 ELSE 0 END AS mort_hosp,
+                COALESCE(f.readmission_30, 0) AS readmission_30
+            FROM physionet-data.mimic_derived.icustay_detail i
+                INNER JOIN physionet-data.mimic_core.admissions a ON i.hadm_id = a.hadm_id
+                INNER JOIN physionet-data.mimic_icu.icustays s ON i.stay_id = s.stay_id
+                LEFT OUTER JOIN (SELECT d.stay_id, 1 as readmission_30
+                            FROM physionet-data.mimic_icu.icustays c, physionet-data.mimic_icu.icustays d
+                            WHERE c.subject_id=d.subject_id
+                            AND c.stay_id > d.stay_id
+                            AND c.intime - d.outtime <= INTERVAL 30 DAY
+                            AND c.outtime = (SELECT MIN(e.outtime) from physionet-data.mimic_icu.icustays e 
+                                            WHERE e.subject_id=c.subject_id
+                                            AND e.intime>d.outtime) ) f
+                            ON i.stay_id=f.stay_id
+            WHERE i.hadm_id is not null and i.stay_id is not null
+                and i.hospstay_seq = 1
+                and i.icustay_seq = 1
+                and i.admission_age >= {min_age}
+                and (i.icu_outtime >= (i.icu_intime + INTERVAL {min_los} Hour))
+                and (i.icu_outtime <= (i.icu_intime + INTERVAL {max_los} Hour))
+            ORDER BY subject_id
+            ;
+            """.format(min_age=args.age_min, min_los=args.los_min, max_los=args.los_max)
+
+        patient = gcp2df(query)
+        # TODO add special group filtering
     icuids_to_keep = patient['stay_id']
     icuids_to_keep = set([str(s) for s in icuids_to_keep])
     subject_to_keep = patient['subject_id']
@@ -157,7 +273,6 @@ def extract_mimic(args):
     INNER JOIN physionet-data.mimic_derived.icustay_detail i ON i.subject_id = b.subject_id
     where b.subject_id in ({icuids})
     and b.charttime between i.icu_intime and i.icu_outtime
-    LIMIT 1000
     """.format(icuids=','.join(subject_to_keep))
     chemistry = gcp2df(query)
 
@@ -892,6 +1007,70 @@ def extract_mimic(args):
     vital_final.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_vital.h5'), key='mimic_vital')
     static.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_static.h5'), key='mimic_static')
     intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_inv.h5'), key='mimic_inv')
+
+    # remove outliers
+    total_cols = vital_final.columns.tolist()
+    mean_col = [i for i in total_cols if 'mean' in i]
+    X_mean = vital_final.loc[:, mean_col]
+
+    range_dict_high = {'so2': 100, 'po2': 770, 'pco2': 220, 'ph': 10, 'baseexcess': 100, 'bicarbonate': 66,
+                       'chloride': 200, 'hemoglobin': 30, 'hematocrit': 100, 'calcium': 1.87, 'temperature': 47,
+                       'potassium': 15, 'sodium': 250, 'lactate': 33, 'glucose': 2200, 'heart_rate': 390, 'sbp': 375,
+                       'sbp_ni': 375, 'mbp': 375, 'mbp_ni': 375, 'dbp': 375, 'dbp_ni': 375, 'resp_rate': 330, 'wbc': 1100,
+                       'atypical_lymphocytes': 17, 'bun': 300, 'calcium_chem': 28, 'fibrinogen': 1709, 'Phosphate': 22,
+                       'Positive end-expiratory pressure': 30, 'ck_cpk': 10000, 'ggt': 10000, 'Peak inspiratory pressure': 40,
+                       'Magnesium': 22, 'Plateau Pressure': 61, 'Tidal Volume Observed': 2000, 'nrbc': 143, 'inr': 15,
+                       'pt': 150, 'mch': 46, 'mchc': 43, 'troponin_t': 24, 'albumin': 60, 'aniongap': 55, 'creatinine': 66,
+                       'platelet': 2200, 'alt': 11000, 'ast': 22000, 'alp': 4000, 'ld_ldh': 35000, 'bilirubin_total': 66,
+                       'bilirubin_indirect': 66, 'bilirubin_direct': 66, 'weight': 550, 'uo': 2445, 'Central Venous Pressure': 400 }
+    range_dict_low = {'ph': 6.3, 'baseexcess': -100,  'temperature': 14.2, 'lactate': 0.01, 'uo': 0, 'pH urine': 3}
+
+    for var_to_remove in range_dict_high:
+        remove_outliers_h(vital_final, X_mean, var_to_remove, range_dict_high[var_to_remove])
+    for var_to_remove in range_dict_low:
+        remove_outliers_l(vital_final, X_mean, var_to_remove, range_dict_low[var_to_remove])
+
+    # normalize
+    count_col = [i for i in total_cols if 'count' in i]
+    col_means, col_stds = vital_final.loc[:, mean_col].mean(axis=0), vital_final.loc[:, mean_col].std(axis=0)
+    vital_final.loc[:, mean_col] = (vital_final.loc[:, mean_col] - col_means) / col_stds
+    icustay_means = vital_final.loc[:, mean_col].groupby(ID_COLS).mean()
+    # impute
+    vital_final.loc[:, mean_col] = vital_final.loc[:, mean_col].groupby(ID_COLS).fillna(method='ffill').groupby(ID_COLS).fillna(
+        icustay_means).fillna(0)
+    # 0 or 1
+    vital_final.loc[:, count_col] = (vital_final.loc[:, count_col] > 0).astype(float)
+    # at this satge only 3 last columns has nan values
+    vital_final = vital_final.fillna(0)
+
+    # split data
+    stays_v = set(vital_final.index.get_level_values(2).values)
+    stays_static = set(static.index.get_level_values(2).values)
+    stays_int = set(intervention.index.get_level_values(2).values)
+    assert stays_v == stays_static, "Subject ID pools differ!"
+    assert stays_v == stays_int, "Subject ID pools differ!"
+    train_frac, dev_frac, test_frac = 0.7, 0.1, 0.2
+    SEED = 41
+    np.random.seed(SEED)
+    subjects, N = np.random.permutation(list(stays_v)), len(stays_v)
+    N_train, N_dev, N_test = int(train_frac * N), int(dev_frac * N), int(test_frac * N)
+    train_stay = list(stays_v)[:N_train]
+    dev_stay = list(stays_v)[N_train:N_train + N_dev]
+    test_stay = list(stays_v)[N_train + N_dev:]
+
+    [(vital_train, vital_dev, vital_test), (Y_train, Y_dev, Y_test), (static_train, static_dev, static_test)] = [
+        [df[df.index.get_level_values(2).isin(s)] for s in (train_stay, dev_stay, test_stay)] \
+        for df in (vital_final, intervention, static)]
+
+    vital_train.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='vital_train')
+    vital_dev.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='vital_dev')
+    vital_test.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='vital_test')
+    Y_train.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='inv_train')
+    Y_dev.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='inv_dev')
+    Y_test.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='inv_test')
+    static_train.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='static_train')
+    static_dev.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='static_dev')
+    static_test.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='static_test')
     return
 
 

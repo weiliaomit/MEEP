@@ -207,3 +207,13 @@ def continuous_outcome_processing(out_data, data, icustay_timediff):
     out_data['endtime'] = out_data.endtime.apply(lambda x: x.days * 24 + x.seconds // 3600)
     out_data = out_data.groupby(['stay_id'])
     return out_data
+
+def remove_outliers_h(X, X_or, col, range):
+    X.loc[:, [(col, 'mean')]] = X.loc[:, [(col, 'mean')]].mask((X_or.loc[:, [(col, 'mean')]] > range).values)
+    X.loc[:, [(col, 'count')]] = X.loc[:, [(col, 'count')]].mask((X_or.loc[:, [(col, 'mean')]] > range).values, other=0.0)
+    return
+
+def remove_outliers_l(X, X_or, col, range):
+    X.loc[:, [(col, 'mean')]] = X.loc[:, [(col, 'mean')]].mask((X_or.loc[:, [(col, 'mean')]] < range).values)
+    X.loc[:, [(col, 'count')]] = X.loc[:, [(col, 'count')]].mask((X_or.loc[:, [(col, 'mean')]] < range).values, other=0.0)
+    return

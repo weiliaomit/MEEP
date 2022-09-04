@@ -9,11 +9,11 @@ if __name__ == '__main__':
     parser.add_argument("--los_max", type=int, default=240, help='Max ICU LOS in hour')
     parser.add_argument("--exit_point", type=str, default='All', choices=['All', 'Raw'],
                         help='Where to stop the pipeline')
-    parser.add_argument("--patient_group", type=str, default='None', choices=['None', 'sepsis-3'],
+    parser.add_argument("--patient_group", type=str, default='Generic', choices=['Generic', 'sepsis-3', 'ARF', 'shock', 'COPD', 'CHF'],
                         help='Specific groups to extract')
     parser.add_argument("--project_id", type=str, default='lucid-inquiry-337016',
                         help='Specify the Bigquery billing project')
-    parser.add_argument("--output_dir", type=str, default='/content/output')
+    parser.add_argument("--output_dir", type=str, default='./output')
     args = parser.parse_args()
     if args.database == 'MIMIC':
         extract_mimic(args)
