@@ -22,4 +22,3 @@ if __name__ == '__main__':
     elif args.database == 'eICU':
         extract_eicu(args)
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/

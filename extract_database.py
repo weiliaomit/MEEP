@@ -1203,6 +1203,7 @@ def extract_eicu(args):
             WHERE ROUND(i.unitdischargeoffset/60) Between {min_los} and {max_los} 
             AND age not in ({young_age})
             """.format(min_los=args.los_min, max_los=args.los_max, young_age=','.join(set([str(i) for i in range(args.age_min)])))
+        patient = gcp2df(query)
 
     patient['unitadmitoffset'] = 0
     icuids_to_keep = patient['patientunitstayid']
@@ -2430,12 +2431,69 @@ def extract_eicu(args):
     vital.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_vital.h5'), key='eicu_vital')
 
     total_cols = vital.columns.tolist()
-    
+    mean_col = [i for i in total_cols if 'mean' in i]
+    X_mean = vital.loc[:, mean_col]
 
+    range_dict_high = {'calcium': 28,  'chloride': 200, 'bicarbonate': 66, 'TotalCO2': 80, 'hemoglobin': 30,
+                       'platelets': 2200, 'ptt': 150, 'basos': 8,  'alp': 4000, 'ast': 22000, 'alt': 11000,
+                       'troponin_t': 24, 'cpk_mb': 700, 'cpk': 10000,  'pt': 150, 'mch': 46, 'mchc': 43,
+                       'mcv': 140, 'rbc': 8, 'rdw': 38, 'amylase': 2800, 'crp': 4000, 'urineoutput': 2445,
+                       'weight': 550, 'urine_prot': 7500, 'cvp': 400}
+    range_dict_low = {}
 
+    for var_to_remove in range_dict_high:
+        remove_outliers_h(vital, X_mean, var_to_remove, range_dict_high[var_to_remove])
+    for var_to_remove in range_dict_low:
+        remove_outliers_l(vital, X_mean, var_to_remove, range_dict_low[var_to_remove])
 
+    # read_mimic col means col stds
+    mimic_mean_std = pd.read_hdf(os.path.join('./Extract', 'MEEP_stats_0702.h5'), key='vital_mean_std')
+    del X_mean
+    # normalize
+    count_col = [i for i in total_cols if 'count' in i]
+    # fix fio2 column by x100
+    vital.loc[:, [('fio2', 'mean')]] = vital.loc[:, [('fio2', 'mean')]] * 100
+    # col_means, col_stds = vital.loc[:, mean_col].mean(axis=0), vital.loc[:, mean_col].std(axis=0)
+    # first use mimic mean to normorlize
+    col_means, col_stds = mimic_mean_std.loc[:, 'mean'], mimic_mean_std.loc[:, 'std']
+    col_means.index = mean_col
+    col_stds.index = mean_col
+    vital.loc[:, mean_col] = (vital.loc[:, mean_col] - col_means) / col_stds
+    icustay_means = vital.loc[:, mean_col].groupby(ID_COLS).mean()
+    # impute
+    vital.loc[:, mean_col] = vital.loc[:, mean_col].groupby(ID_COLS).fillna(method='ffill').groupby(ID_COLS).fillna(
+        icustay_means).fillna(0)
+    # 0 or 1
+    vital.loc[:, count_col] = (vital.loc[:, count_col] > 0).astype(float)
+    # at this satge only 3 last columns has nan values
+    vital = vital.fillna(0)
 
+    # split data
+    stays_v = set(vital.index.get_level_values(0).values)
+    stays_static = set(static.index.get_level_values(0).values)
+    stays_int = set(intervention.index.get_level_values(0).values)
+    assert stays_v == stays_static, "Stay ID pools differ!"
+    assert stays_v == stays_int, "Stay ID pools differ!"
+    train_frac, dev_frac, test_frac = 0.7, 0.1, 0.2
+    SEED = 41
+    np.random.seed(SEED)
+    subjects, N = np.random.permutation(list(stays_v)), len(stays_v)
+    N_train, N_dev, N_test = int(train_frac * N), int(dev_frac * N), int(test_frac * N)
+    train_stay = list(stays_v)[:N_train]
+    dev_stay = list(stays_v)[N_train:N_train + N_dev]
+    test_stay = list(stays_v)[N_train + N_dev:]
 
+    [(vital_train, vital_dev, vital_test), (Y_train, Y_dev, Y_test), (static_train, static_dev, static_test)] = [
+        [df[df.index.get_level_values(0).isin(s)] for s in (train_stay, dev_stay, test_stay)] \
+        for df in (vital, intervention, static)]
 
-
+    vital_train.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_train')
+    vital_dev.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_dev')
+    vital_test.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_test')
+    Y_train.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='inv_train')
+    Y_dev.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='inv_dev')
+    Y_test.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='inv_test')
+    static_train.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='static_train')
+    static_dev.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='static_dev')
+    static_test.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='static_test')
     return
