@@ -2487,13 +2487,14 @@ def extract_eicu(args):
         [df[df.index.get_level_values(0).isin(s)] for s in (train_stay, dev_stay, test_stay)] \
         for df in (vital, intervention, static)]
 
-    vital_train.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_train')
-    vital_dev.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_dev')
-    vital_test.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_test')
-    Y_train.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='inv_train')
-    Y_dev.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='inv_dev')
-    Y_test.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='inv_test')
-    static_train.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='static_train')
-    static_dev.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='static_dev')
-    static_test.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='static_test')
+    if args.exit_point == 'All':
+        vital_train.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_train')
+        vital_dev.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_dev')
+        vital_test.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_test')
+        Y_train.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='inv_train')
+        Y_dev.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='inv_dev')
+        Y_test.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='inv_test')
+        static_train.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='static_train')
+        static_dev.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='static_dev')
+        static_test.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='static_test')
     return

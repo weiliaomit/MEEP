@@ -268,4 +268,4 @@ def process_inv(df, name):
     df = df.groupby(['patientunitstayid']).apply(add_outcome_indicators_e)
     df.rename(columns={'on': name}, inplace=True)
     df = df.reset_index()
-    return df
+    return df 
