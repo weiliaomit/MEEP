@@ -20,7 +20,7 @@ if __name__ == '__main__':
                         help="Whether use MIMIC mean and std to standardize eICU variables")
     parser.add_argument("--output_dir", type=str, default='./output')
     args = parser.parse_args()
-    if args.database == 'MIMIC':
+    if args.database == 'MIMIC': 
         extract_mimic(args)
     elif args.database == 'eICU':
         extract_eicu(args)
