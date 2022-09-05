@@ -3,6 +3,7 @@ An MIMIC and eICU extraction pipeline
 
 ## 1. Prerequisites 
 1).  Both database are hosted on Google Cloud and in order to have access, you can follow the instructions in the following links:  [MIMIV IV](https://physionet.org/content/mimiciv/1.0/) and [eICU](https://eicu-crd.mit.edu/about/eicu/)
+
 2). Set up [Google Cloud](https://cloud.google.com/run/docs/setup) and have a billing project id ready. You can test if you can query MIMIC-IV and eICU database from Google Cloud by running the following test scripts:
 
     from google.colab import auth
