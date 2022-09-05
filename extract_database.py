@@ -20,7 +20,7 @@ def extract_mimic(args):
 
     # level_to_change = 1
     ID_COLS = ['subject_id', 'hadm_id', 'stay_id']
-    ITEM_COLS = ['itemid', 'label', 'LEVEL1', 'LEVEL2']
+    # ITEM_COLS = ['itemid', 'label', 'LEVEL1', 'LEVEL2']
 
     # datatime format to hour
     to_hours = lambda x: max(0, x.days * 24 + x.seconds // 3600)
@@ -190,7 +190,7 @@ def extract_mimic(args):
             """.format(min_age=args.age_min, min_los=args.los_min, max_los=args.los_max)
 
         patient = gcp2df(query)
-        # TODO add special group filtering
+    print("Patient icu info query done, start querying variables in Dynamic table")
     icuids_to_keep = patient['stay_id']
     icuids_to_keep = set([str(s) for s in icuids_to_keep])
     subject_to_keep = patient['subject_id']
@@ -599,6 +599,7 @@ def extract_mimic(args):
     col.insert(col.index(('has_sensitivity', 'last')) + 1, ('has_sensitivity', 'mask'))
 
     vital_final = vital_encode[col[:-3]]
+    print('Start querying variables in the Intervention table')
 
     # start query intervention
     query = """
@@ -657,8 +658,6 @@ def extract_mimic(args):
     # vaso agents
     column_names = ['dopamine', 'epinephrine', 'norepinephrine', 'phenylephrine', 'vasopressin', 'dobutamine',
                     'milrinone']
-
-    # TODO(mmd): This section doesn't work. What is its purpose?
     for c in column_names:
         # TOTAL VASOPRESSOR DATA
         query = """
@@ -977,6 +976,7 @@ def extract_mimic(args):
 
     intervention.set_index(ID_COLS + ['hours_in'], inplace=True)
     intervention.sort_index(level=['stay_id', 'hours_in'], inplace=True)
+    print('Start querying variables in the Static table')
 
     # static info
     #  query patients anchor year
@@ -1007,40 +1007,54 @@ def extract_mimic(args):
     anchor_year.set_index(ID_COLS, inplace=True)
     static = patient.join([comorbidity, anchor_year['anchor_year_group']])
 
-    vital_final.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_vital.h5'), key='mimic_vital')
-    static.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_static.h5'), key='mimic_static')
-    intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_inv.h5'), key='mimic_inv')
+    if args.exit_point == 'Raw':
+        print('Exit point is after querying raw records, saving results...')
+        vital_final.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_vital.h5'), key='mimic_vital')
+        static.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_static.h5'), key='mimic_static')
+        intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_inv.h5'), key='mimic_inv')
+        return
 
     # remove outliers
     total_cols = vital_final.columns.tolist()
     mean_col = [i for i in total_cols if 'mean' in i]
     X_mean = vital_final.loc[:, mean_col]
 
-    range_dict_high = {'so2': 100, 'po2': 770, 'pco2': 220, 'ph': 10, 'baseexcess': 100, 'bicarbonate': 66,
-                       'chloride': 200, 'hemoglobin': 30, 'hematocrit': 100, 'calcium': 1.87, 'temperature': 47,
-                       'potassium': 15, 'sodium': 250, 'lactate': 33, 'glucose': 2200, 'heart_rate': 390, 'sbp': 375,
-                       'sbp_ni': 375, 'mbp': 375, 'mbp_ni': 375, 'dbp': 375, 'dbp_ni': 375, 'resp_rate': 330,
-                       'wbc': 1100,
-                       'atypical_lymphocytes': 17, 'bun': 300, 'calcium_chem': 28, 'fibrinogen': 1709, 'Phosphate': 22,
-                       'Positive end-expiratory pressure': 30, 'ck_cpk': 10000, 'ggt': 10000,
-                       'Peak inspiratory pressure': 40,
-                       'Magnesium': 22, 'Plateau Pressure': 61, 'Tidal Volume Observed': 2000, 'nrbc': 143, 'inr': 15,
-                       'pt': 150, 'mch': 46, 'mchc': 43, 'troponin_t': 24, 'albumin': 60, 'aniongap': 55,
-                       'creatinine': 66,
-                       'platelet': 2200, 'alt': 11000, 'ast': 22000, 'alp': 4000, 'ld_ldh': 35000,
-                       'bilirubin_total': 66,
-                       'bilirubin_indirect': 66, 'bilirubin_direct': 66, 'weight': 550, 'uo': 2445,
-                       'Central Venous Pressure': 400}
-    range_dict_low = {'ph': 6.3, 'baseexcess': -100, 'temperature': 14.2, 'lactate': 0.01, 'uo': 0, 'pH urine': 3}
+    if not args.no_removal:
+        print('Performing outlier removal')
+        range_dict_high = {'so2': 100, 'po2': 770, 'pco2': 220, 'ph': 10, 'baseexcess': 100, 'bicarbonate': 66,
+                           'chloride': 200, 'hemoglobin': 30, 'hematocrit': 100, 'calcium': 1.87, 'temperature': 47,
+                           'potassium': 15, 'sodium': 250, 'lactate': 33, 'glucose': 2200, 'heart_rate': 390, 'sbp': 375,
+                           'sbp_ni': 375, 'mbp': 375, 'mbp_ni': 375, 'dbp': 375, 'dbp_ni': 375, 'resp_rate': 330,
+                           'wbc': 1100, 'atypical_lymphocytes': 17, 'bun': 300, 'calcium_chem': 28, 'fibrinogen': 1709,
+                           'Phosphate': 22, 'Positive end-expiratory pressure': 30, 'ck_cpk': 10000, 'ggt': 10000,
+                           'Peak inspiratory pressure': 40, 'Magnesium': 22, 'Plateau Pressure': 61, 'Tidal Volume Observed': 2000,
+                           'nrbc': 143, 'inr': 15, 'pt': 150, 'mch': 46, 'mchc': 43, 'troponin_t': 24, 'albumin': 60, 'aniongap': 55,
+                           'creatinine': 66, 'platelet': 2200, 'alt': 11000, 'ast': 22000, 'alp': 4000, 'ld_ldh': 35000,
+                           'bilirubin_total': 66, 'bilirubin_indirect': 66, 'bilirubin_direct': 66, 'weight': 550, 'uo': 2445,
+                           'Central Venous Pressure': 400}
+        range_dict_low = {'ph': 6.3, 'baseexcess': -100, 'temperature': 14.2, 'lactate': 0.01, 'uo': 0, 'pH urine': 3}
 
-    for var_to_remove in range_dict_high:
-        remove_outliers_h(vital_final, X_mean, var_to_remove, range_dict_high[var_to_remove])
-    for var_to_remove in range_dict_low:
-        remove_outliers_l(vital_final, X_mean, var_to_remove, range_dict_low[var_to_remove])
+        for var_to_remove in range_dict_high:
+            remove_outliers_h(vital_final, X_mean, var_to_remove, range_dict_high[var_to_remove])
+        for var_to_remove in range_dict_low:
+            remove_outliers_l(vital_final, X_mean, var_to_remove, range_dict_low[var_to_remove])
+    else:
+        print('Skipped outlier removal')
+
+    if args.exit_point == 'Outlier_removal':
+        print('Exit point is after removing outliers, saving results...')
+        vital_final.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_vital.h5'), key='mimic_vital')
+        static.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_static.h5'), key='mimic_static')
+        intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_inv.h5'), key='mimic_inv')
+        return
 
     # normalize
+    print('Start normalization and data imputation ')
     count_col = [i for i in total_cols if 'count' in i]
     col_means, col_stds = vital_final.loc[:, mean_col].mean(axis=0), vital_final.loc[:, mean_col].std(axis=0)
+    # saving col_means and col_stds for eicu normalization
+    df_mean_std = col_means.to_frame('mean').join(col_stds.to_frame('std'))
+    df_mean_std.to_hdf(os.path.join(args.output_dir, 'MIMIC_mean_std_stats.h5'), 'MIMIC_mean_std')
     vital_final.loc[:, mean_col] = (vital_final.loc[:, mean_col] - col_means) / col_stds
     icustay_means = vital_final.loc[:, mean_col].groupby(ID_COLS).mean()
     # impute
@@ -1051,6 +1065,13 @@ def extract_mimic(args):
     vital_final.loc[:, count_col] = (vital_final.loc[:, count_col] > 0).astype(float)
     # at this satge only 3 last columns has nan values
     vital_final = vital_final.fillna(0)
+
+    if args.exit_point == 'Impute':
+        print('Exit point is after data imputation, saving results...')
+        vital_final.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_vital.h5'), key='mimic_vital')
+        static.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_static.h5'), key='mimic_static')
+        intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_MIMIC_inv.h5'), key='mimic_inv')
+        return
 
     # split data
     stays_v = set(vital_final.index.get_level_values(2).values)
@@ -1071,15 +1092,17 @@ def extract_mimic(args):
         [df[df.index.get_level_values(2).isin(s)] for s in (train_stay, dev_stay, test_stay)] \
         for df in (vital_final, intervention, static)]
 
-    vital_train.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='vital_train')
-    vital_dev.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='vital_dev')
-    vital_test.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='vital_test')
-    Y_train.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='inv_train')
-    Y_dev.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='inv_dev')
-    Y_test.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='inv_test')
-    static_train.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='static_train')
-    static_dev.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='static_dev')
-    static_test.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='static_test')
+    if args.exit_point == 'All':
+        print('Exit point is after all steps, including train-val-test splitting, saving results...')
+        vital_train.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='vital_train')
+        vital_dev.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='vital_dev')
+        vital_test.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='vital_test')
+        Y_train.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='inv_train')
+        Y_dev.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='inv_dev')
+        Y_test.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='inv_test')
+        static_train.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='static_train')
+        static_dev.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='static_dev')
+        static_test.to_hdf(os.path.join(args.output_dir, 'MIMIC_split.hdf5'), key='static_test')
     return
 
 

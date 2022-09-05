@@ -13,14 +13,14 @@ if __name__ == '__main__':
                         help='Specific groups to extract')
     parser.add_argument("--custom_id", action='store_true', default=False, help="Whether use custom stay ids")
     parser.add_argument('--customid_dir', required='--custom_id' in sys.argv, help="Specify custom id dir")
-    parser.add_argument("--exit_point", type=str, default='All', choices=['All', 'Raw', 'Impute', 'Split'],
+    parser.add_argument("--exit_point", type=str, default='All', choices=['All', 'Raw', 'Outlier_removal', 'Impute'],
                         help='Where to stop the pipeline')
     parser.add_argument("--no_removal", action='store_false', default=True, help="Whether use custom stay ids")
     parser.add_argument("--norm_eicu", type=str, default='MIMIC', choices=['MIMIC', 'eICU'],
                         help="Whether use MIMIC mean and std to standardize eICU variables")
     parser.add_argument("--output_dir", type=str, default='./output')
     args = parser.parse_args()
-    if args.database == 'MIMIC': 
+    if args.database == 'MIMIC':
         extract_mimic(args)
     elif args.database == 'eICU':
         extract_eicu(args)
