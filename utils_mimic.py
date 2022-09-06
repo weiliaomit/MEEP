@@ -208,17 +208,39 @@ def continuous_outcome_processing(out_data, data, icustay_timediff):
     return out_data
 
 def remove_outliers_h(X, X_or, col, range):
+    """
+    Remove entries higher than a threshold and set count column to 0
+    :param X: pd.DataFrame, all the columns with mean columns to be changed
+    :param X_or: pd.DataFrame, all the mean columns with original values
+    :param col: str, name of the column to be cleaned
+    :param range: int, the threshold value
+    :return: None,
+    """
     X.loc[:, [(col, 'mean')]] = X.loc[:, [(col, 'mean')]].mask((X_or.loc[:, [(col, 'mean')]] > range).values)
     X.loc[:, [(col, 'count')]] = X.loc[:, [(col, 'count')]].mask((X_or.loc[:, [(col, 'mean')]] > range).values, other=0.0)
     return
 
 def remove_outliers_l(X, X_or, col, range):
+    """
+    Remove entries lower than a threshold and set count column to 0
+    :param X: pd.DataFrame, all the columns with mean columns to be changed
+    :param X_or: pd.DataFrame, all the mean columns with original values
+    :param col: str, name of the column to be cleaned
+    :param range: int, the threshold value
+    :return: None,
+    """
     X.loc[:, [(col, 'mean')]] = X.loc[:, [(col, 'mean')]].mask((X_or.loc[:, [(col, 'mean')]] < range).values)
     X.loc[:, [(col, 'count')]] = X.loc[:, [(col, 'count')]].mask((X_or.loc[:, [(col, 'mean')]] < range).values, other=0.0)
     return
 
 def fill_query(df, fill_df, time='chartoffset'):
-
+    """
+    Organize queried results into the template fill_df format
+    :param df: pd.DataFrame, queried results
+    :param fill_df: pd.DataFrame, a template with all stay ids and each stay id has hours_in level 1 index
+    :param time: str, how the time column was represented e.g. 'chartoffset', 'observationoffset'
+    :return: df, pd.DataFrame, the same structure as the template
+    """
     df['hours_in'] = df[time].floordiv(60)
     df.drop(columns=[time], inplace=True)
     df.set_index(['patientunitstayid']+ ['hours_in'], inplace=True)
@@ -230,6 +252,12 @@ def fill_query(df, fill_df, time='chartoffset'):
     return df
 
 def add_outcome_indicators_e(out_gb):
+    """
+    For eICU data, iterate a groupby object and add intervention procedure indicator
+    :param out_gb: Pandas groupby object, specific intervention variable grouped by e.g. 'patientunitstayid'
+    :return: pd.DataFrame, for each stay_id, iterate through the hours with the procedure, represent it by 1
+                for any other hours, fill 0,
+    """
     # patientunitstayid = out_gb['patientunitstayid'].unique()[0]
     max_hrs = out_gb['max_hours'].unique()[0]
     on_hrs = set()
@@ -252,6 +280,12 @@ def add_outcome_indicators_e(out_gb):
                         'hours_in':hours, 'on':on_vals}) #icustay_id': icustay_id})
 
 def add_blank_indicators_e(out_gb):
+    """
+    For eICU data, add blank indicator for stays with no ventilation records
+    :param out_gb: Pandas groupby object, grouped from a dataframe
+    :return: pd.DataFrame, index: patientunitstayid, column names: hours_in, on
+            with on being all 0s
+    """
     # subject_id = out_gb['subject_id'].unique()[0]
     # hadm_id = out_gb['hadm_id'].unique()[0]
     #icustay_id = out_gb['icustay_id'].unique()[0]
@@ -263,6 +297,13 @@ def add_blank_indicators_e(out_gb):
                         'hours_in':hrs, 'on':vals})#'icustay_id': icustay_id,
 
 def process_inv(df, name):
+    """
+    Organize queried intervention table
+    :param df:  pd.DataFrame, Queried intervention results,
+    :param name: str, column name of the intervention procedure, e.g. 'vent'
+    :return: df, pd.DataFrame, after organizing, the last column will indicate a state at that hour (0 or 1)
+                    columns, e.g. patientunitstayid, hours_in, vent
+    """
     df.starttime = df.starttime.astype(int)
     df.endtime = df.endtime.astype(int)
     df.max_hours = df.max_hours.astype(int)

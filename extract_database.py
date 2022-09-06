@@ -2516,7 +2516,7 @@ def extract_eicu(args):
     # col_means, col_stds = vital.loc[:, mean_col].mean(axis=0), vital.loc[:, mean_col].std(axis=0)
     # first use mimic mean to normorlize
     if args.norm_eicu == 'MIMIC':
-        mimic_mean_std = pd.read_hdf(os.path.join('./Extract', 'MEEP_stats_0702.h5'), key='vital_mean_std')
+        mimic_mean_std = pd.read_hdf(os.path.join(args.output_dir, 'MIMIC_mean_std_stats.h5'), key='MIMIC_mean_std')
         col_means, col_stds = mimic_mean_std.loc[:, 'mean'], mimic_mean_std.loc[:, 'std']
         col_means.index = mean_col
         col_stds.index = mean_col
