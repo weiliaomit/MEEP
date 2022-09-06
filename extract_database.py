@@ -1205,9 +1205,8 @@ def extract_eicu(args):
             From physionet-data.eicu_crd.patient i
             WHERE ROUND(i.unitdischargeoffset/60) Between {min_los} and {max_los} 
             AND patientunitstayid in ({group_icuids})
-            AND age not in ({young_age})
             """.format(group_icuids=','.join(get_group_id(args)), min_los=args.los_min,
-                       max_los=args.los_max, young_age=','.join(set([str(i) for i in range(args.age_min)])))
+                       max_los=args.los_max)
         patient = gcp2df(query)
 
     else:
@@ -1224,12 +1223,12 @@ def extract_eicu(args):
                         ELSE NULL END AS icu_mort, i.hospitaldischargeyear, i.hospitalid      
             From physionet-data.eicu_crd.patient i
             WHERE ROUND(i.unitdischargeoffset/60) Between {min_los} and {max_los} 
-            AND age not in ({young_age})
-            """.format(min_los=args.los_min, max_los=args.los_max, young_age=','.join(set([str(i) for i in range(args.age_min)])))
+            """.format(min_los=args.los_min, max_los=args.los_max)
         patient = gcp2df(query)
 
     print("Patient icu info query done, start querying variables in Dynamic table")
     patient['unitadmitoffset'] = 0
+    patient = patient.loc[~patient.loc[:, 'age'].isin(args.age_min)]
     icuids_to_keep = patient['patientunitstayid']
     icuids_to_keep = set([str(s) for s in icuids_to_keep])
     patient.set_index('patientunitstayid', inplace=True)
