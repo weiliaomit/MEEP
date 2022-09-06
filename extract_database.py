@@ -1678,7 +1678,7 @@ def extract_eicu(args):
     AND ml.culturetakenoffset >=0
     LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
-    microlab = gcp2df(query, fill_df)
+    microlab = gcp2df(query)
 
     microlab['hours_in'] = microlab['culturetakenoffset'].floordiv(60)
     microlab.drop(columns=['culturetakenoffset'], inplace=True)
