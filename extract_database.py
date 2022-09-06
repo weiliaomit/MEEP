@@ -26,7 +26,7 @@ def extract_mimic(args):
     to_hours = lambda x: max(0, x.days * 24 + x.seconds // 3600)
 
     def get_group_id(args):
-        if args.patient_group == 'sepsis-3':
+        if args.patient_group == 'sepsis_3':
             query = \
                 """
                 SELECT  stay_id
@@ -1121,8 +1121,8 @@ def extract_eicu(args):
     to_hours = lambda x: int(x // 60)
 
     def get_group_id(args):
-        if args.patient_group == 'sepsis-3':
-            sepsis3_ids = pd.read_csv('./resources/sepsis3_eicu.csv')
+        if args.patient_group == 'sepsis_3':
+            sepsis3_ids = pd.read_csv('./resources/eicu_sepsis_3_id.csv')
             group_stay_ids = set([str(s) for s in sepsis3_ids['patientunitstayid']])
         elif args.patient_group == 'ARF':
             query = \
@@ -1228,6 +1228,7 @@ def extract_eicu(args):
             """.format(min_los=args.los_min, max_los=args.los_max, young_age=','.join(set([str(i) for i in range(args.age_min)])))
         patient = gcp2df(query)
 
+    print("Patient icu info query done, start querying variables in Dynamic table")
     patient['unitadmitoffset'] = 0
     icuids_to_keep = patient['patientunitstayid']
     icuids_to_keep = set([str(s) for s in icuids_to_keep])
@@ -1283,15 +1284,15 @@ def extract_eicu(args):
         AND lab.labresultoffset = vw0.labresultoffset
         AND lab.labresultrevisedoffset = vw0.labresultrevisedoffset
       WHERE
-         (lab.labname = 'paO2' and lab.labresult > 0 and lab.labresult <= 770)
-      OR (lab.labname = 'paCO2' and lab.labresult > 0 and lab.labresult <= 220)
-      OR (lab.labname = 'pH' and lab.labresult >= 6.3 and lab.labresult <= 10)
+         (lab.labname = 'paO2' and lab.labresult > 0 and lab.labresult <= 9999)
+      OR (lab.labname = 'paCO2' and lab.labresult > 0 and lab.labresult <= 9999)
+      OR (lab.labname = 'pH' and lab.labresult >= 6.3 and lab.labresult <= 9999)
       OR (lab.labname = 'FiO2' and lab.labresult >= 0.2 and lab.labresult <= 1.0)
       -- we will fix fio2 units later
       OR (lab.labname = 'FiO2' and lab.labresult >= 20 and lab.labresult <= 100)
-      OR (lab.labname = 'anion gap' and lab.labresult >= 0 and lab.labresult <= 55)
+      OR (lab.labname = 'anion gap' and lab.labresult >= 0 and lab.labresult <= 9999)
       OR (lab.labname = 'Base Excess' and lab.labresult >= -100 and lab.labresult <= 100)
-      OR (lab.labname = 'PEEP' and lab.labresult >= 0 and lab.labresult <= 30)
+      OR (lab.labname = 'PEEP' and lab.labresult >= 0 and lab.labresult <= 9999)
     )
     select
         patientunitstayid
@@ -1299,7 +1300,7 @@ def extract_eicu(args):
       -- the aggregate (max()) only ever applies to 1 value due to the where clause
       , MAX(case
             when labname != 'FiO2' then null
-            when labresult >= 20 then labresult/100.0
+            when labresult <= 1 then labresult*100.0
           else labresult end) as fio2
       , MAX(case when labname = 'paO2' then labresult else null end) as pao2
       , MAX(case when labname = 'paCO2' then labresult else null end) as paco2
@@ -1314,6 +1315,7 @@ def extract_eicu(args):
     and labresultoffset >=0
     group by patientunitstayid, labresultoffset
     order by patientunitstayid, labresultoffset
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     bg = gcp2df(query)
     bg = fill_query(bg, fill_df)
@@ -1398,25 +1400,25 @@ def extract_eicu(args):
         AND lab.labresultrevisedoffset = vw0.labresultrevisedoffset
       -- only valid lab values
       WHERE
-           (lab.labname = 'albumin' and lab.labresult > 0 and lab.labresult <=60)
-        OR (lab.labname = 'total bilirubin' and lab.labresult > 0 and lab.labresult <= 66)
-        OR (lab.labname = 'BUN' and lab.labresult > 0 and lab.labresult <= 300)
+           (lab.labname = 'albumin' and lab.labresult > 0 and lab.labresult <=9999)
+        OR (lab.labname = 'total bilirubin' and lab.labresult > 0 and lab.labresult <= 9999)
+        OR (lab.labname = 'BUN' and lab.labresult > 0 and lab.labresult <= 9999)
         OR (lab.labname = 'calcium' and lab.labresult > 0 and lab.labresult <= 9999)
         OR (lab.labname = 'chloride' and lab.labresult > 0 and lab.labresult <= 9999)
-        OR (lab.labname = 'creatinine' and lab.labresult >0 and lab.labresult <= 66)
-        OR (lab.labname in ('bedside glucose', 'glucose') and lab.labresult > 0 and lab.labresult <= 2200)
+        OR (lab.labname = 'creatinine' and lab.labresult >0 and lab.labresult <= 9999)
+        OR (lab.labname in ('bedside glucose', 'glucose') and lab.labresult > 0 and lab.labresult <= 9999)
         OR (lab.labname = 'bicarbonate' and lab.labresult > 0 and lab.labresult <= 9999)
         OR (lab.labname = 'Total CO2' and lab.labresult > 0 and lab.labresult <= 9999)
         -- will convert hct unit to fraction later
-        OR (lab.labname = 'Hct' and lab.labresult > 0 and lab.labresult <= 100)
+        OR (lab.labname = 'Hct' and lab.labresult > 0 and lab.labresult <= 9999)
         OR (lab.labname = 'Hgb' and lab.labresult > 0 and lab.labresult <= 9999)
-        OR (lab.labname = 'PT - INR' and lab.labresult > 0 and lab.labresult <= 15)
-        OR (lab.labname = 'lactate' and lab.labresult > 0 and lab.labresult <= 33)
+        OR (lab.labname = 'PT - INR' and lab.labresult > 0 and lab.labresult <= 9999)
+        OR (lab.labname = 'lactate' and lab.labresult > 0 and lab.labresult <= 9999)
         OR (lab.labname = 'platelets x 1000' and lab.labresult >  0 and lab.labresult <= 9999)
-        OR (lab.labname = 'potassium' and lab.labresult > 0 and lab.labresult <= 15)
+        OR (lab.labname = 'potassium' and lab.labresult > 0 and lab.labresult <= 9999)
         OR (lab.labname = 'PTT' and lab.labresult >  0 and lab.labresult <=9999)
-        OR (lab.labname = 'sodium' and lab.labresult > 0 and lab.labresult <= 250)
-        OR (lab.labname = 'WBC x 1000' and lab.labresult > 0 and lab.labresult <= 1100)
+        OR (lab.labname = 'sodium' and lab.labresult > 0 and lab.labresult <= 9999)
+        OR (lab.labname = 'WBC x 1000' and lab.labresult > 0 and lab.labresult <= 9999)
         OR (lab.labname = '-bands' and lab.labresult > 0 and lab.labresult <= 100)
         OR (lab.labname = '-basos' and lab.labresult > 0)
         OR (lab.labname = '-eos' and lab.labresult > 0)
@@ -1489,6 +1491,7 @@ def extract_eicu(args):
     and labresultoffset >=0 
     group by patientunitstayid, labresultoffset
     order by patientunitstayid, labresultoffset
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     lab = gcp2df(query)
     lab = fill_query(lab, fill_df)
@@ -1635,6 +1638,7 @@ def extract_eicu(args):
     AND nursingchartoffset >=0 
     group by patientunitstayid, nursingchartoffset, nursingchartentryoffset
     order by patientunitstayid, nursingchartoffset, nursingchartentryoffset
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     vital = gcp2df(query)
 
@@ -1672,7 +1676,7 @@ def extract_eicu(args):
     FROM physionet-data.eicu_crd.microlab ml
     WHERE ml.patientunitstayid in ({icuids})
     AND ml.culturetakenoffset >=0
-
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     microlab = gcp2df(query, fill_df)
 
@@ -1687,7 +1691,7 @@ def extract_eicu(args):
     FROM physionet-data.eicu_crd_derived.pivoted_gcs gc
     WHERE gc.patientunitstayid in ({icuids})
     and gc.chartoffset >=0
-
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     gcs = gcp2df(query)
     gcs = fill_query(gcs, fill_df)
@@ -1698,7 +1702,7 @@ def extract_eicu(args):
     FROM physionet-data.eicu_crd_derived.pivoted_uo uo
     WHERE uo.patientunitstayid in ({icuids})
     and uo.chartoffset >=0
-
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     uo = gcp2df(query)
     uo = fill_query(uo, fill_df)
@@ -1709,7 +1713,7 @@ def extract_eicu(args):
     FROM physionet-data.eicu_crd_derived.pivoted_weight wg
     WHERE wg.patientunitstayid in ({icuids})
     and wg.chartoffset >=0
-
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     weight = gcp2df(query)
     weight = fill_query(weight, fill_df)
@@ -1720,6 +1724,7 @@ def extract_eicu(args):
     FROM physionet-data.eicu_crd.vitalperiodic vp
     WHERE vp.patientunitstayid in ({icuids})
     and vp.observationoffset >=0
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     cvp = gcp2df(query)
     cvp = fill_query(cvp, fill_df, time='observationoffset')
@@ -1768,10 +1773,10 @@ def extract_eicu(args):
         AND lab.labresultrevisedoffset = vw0.labresultrevisedoffset
       -- only valid lab values
       WHERE
-           (lab.labname = 'urinary creatinine' and lab.labresult > 0 and lab.labresult <= 650) -- based on mimic 
-        OR (lab.labname = 'magnesium' and lab.labresult > 0 and lab.labresult <= 22)
-        OR (lab.labname = 'phosphate' and lab.labresult > 0 and lab.labresult <= 22)
-        OR (lab.labname = "WBC's in urine" and lab.labresult > 0 and lab.labresult <= 750) -- based on mimic
+           (lab.labname = 'urinary creatinine' and lab.labresult > 0) -- based on mimic 
+        OR (lab.labname = 'magnesium' and lab.labresult > 0)
+        OR (lab.labname = 'phosphate' and lab.labresult > 0)
+        OR (lab.labname = "WBC's in urine" and lab.labresult > 0) -- based on mimic
         OR (lab.labname = '24 h urine protein'and lab.labresult > 0) -- no need 
     )
     select
@@ -1788,6 +1793,7 @@ def extract_eicu(args):
     and labresultoffset >=0
     group by patientunitstayid, labresultoffset
     order by patientunitstayid, labresultoffset
+    limit 1000
     """.format(icuids=','.join(icuids_to_keep))
     labmakeup = gcp2df(query)
     labmakeup = fill_query(labmakeup, fill_df)
@@ -1799,6 +1805,7 @@ def extract_eicu(args):
     WHERE rc.respchartvaluelabel = 'Tidal Volume Observed (VT)'
     AND patientunitstayid in ({icuids})
     AND respchartoffset >=0
+    limit 1000
     """.format(icuids=','.join(icuids_to_keep))
     tidal_vol_obs = gcp2df(query)
     tidal_vol_obs = fill_query(tidal_vol_obs, fill_df)
@@ -1895,6 +1902,7 @@ def extract_eicu(args):
         col_ready.append(col[i])
 
     vital = vital[col_ready]
+    print('Start querying variables in the Intervention table')
 
     # Intervention table
     query = \
@@ -1916,6 +1924,7 @@ def extract_eicu(args):
         WHERE  vt.priorventstartoffset is not null 
         AND vt.priorventendoffset is not null
         AND vt.patientunitstayid in ({icuids})
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     vent = gcp2df(query)
 
@@ -1964,6 +1973,7 @@ def extract_eicu(args):
             AND pm.patientunitstayid in ({icuids}) 
             AND pm.drugorderoffset is not null 
             AND pm.drugstopoffset is not null
+            LIMIT 1000
             """.format(drug_name=c, icuids=','.join(icuids_to_keep))
         med = gcp2df(query)
         # 'epinephrine',  'dopamine', 'norepinephrine', 'phenylephrine', \
@@ -2142,6 +2152,7 @@ def extract_eicu(args):
         AND md.patientunitstayid in ({icuids}) 
         AND md.drugstartoffset is not null 
         AND md.drugstopoffset is not null
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
 
     anti = gcp2df(query)
@@ -2164,6 +2175,7 @@ def extract_eicu(args):
         WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*crrt.*$")
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     crrt = gcp2df(query)
 
@@ -2186,6 +2198,7 @@ def extract_eicu(args):
         OR REGEXP_CONTAINS(lower(cellpath), r"^.*red blood cell.*$"))
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     rbc = gcp2df(query)
 
@@ -2208,6 +2221,7 @@ def extract_eicu(args):
         OR REGEXP_CONTAINS(lower(cellpath), r"^.*ffp.*$"))
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     ffp = gcp2df(query)
     ffp = process_inv(ffp, 'ffp')
@@ -2228,6 +2242,7 @@ def extract_eicu(args):
         WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*platelet.*$")
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     platelets = gcp2df(query)
 
@@ -2249,6 +2264,7 @@ def extract_eicu(args):
         WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*colloid.*$")
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     colloid = gcp2df(query)
     colloid = process_inv(colloid, 'colloid')
@@ -2268,6 +2284,7 @@ def extract_eicu(args):
         WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*crystalloid.*$")
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     crystalloid = gcp2df(query)
     crystalloid = process_inv(crystalloid, 'crystalloid')
@@ -2289,6 +2306,8 @@ def extract_eicu(args):
                'vasopressin', 'dobutamine', 'milrinone', 'heparin', 'crrt',
                'rbc', 'platelets', 'ffp', 'colloid', 'crystalloid']
     intervention = intervention.loc[:, new_col]
+    print('Start querying variables in the Static table')
+
     # static query
     # commo
     query = \
@@ -2449,38 +2468,60 @@ def extract_eicu(args):
     static_col.append('hospitalid')
     static = static[static_col]
 
-    intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_inv.h5'), key='eicu_inv')
-    static.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_static.h5'), key='eicu_static')
-    vital.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_vital.h5'), key='eicu_vital')
+    if args.exit_point == 'Raw':
+        print('Exit point is after querying raw records, saving results...')
+        intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_inv.h5'), key='eicu_inv')
+        static.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_static.h5'), key='eicu_static')
+        vital.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_vital.h5'), key='eicu_vital')
+        return
 
     total_cols = vital.columns.tolist()
     mean_col = [i for i in total_cols if 'mean' in i]
     X_mean = vital.loc[:, mean_col]
 
-    range_dict_high = {'calcium': 28,  'chloride': 200, 'bicarbonate': 66, 'TotalCO2': 80, 'hemoglobin': 30,
-                       'platelets': 2200, 'ptt': 150, 'basos': 8,  'alp': 4000, 'ast': 22000, 'alt': 11000,
-                       'troponin_t': 24, 'cpk_mb': 700, 'cpk': 10000,  'pt': 150, 'mch': 46, 'mchc': 43,
-                       'mcv': 140, 'rbc': 8, 'rdw': 38, 'amylase': 2800, 'crp': 4000, 'urineoutput': 2445,
-                       'weight': 550, 'urine_prot': 7500, 'cvp': 400}
-    range_dict_low = {}
+    if not args.no_removal:
+        print('Performing outlier removal')
+        range_dict_high = {'pao2':770, 'paco2': 220, 'pH': 10, 'aniongap': 55, 'baseexcess': 100,
+                           'calcium': 28,  'chloride': 200, 'bicarbonate': 66, 'TotalCO2': 80, 'hemoglobin': 30,
+                           'platelets': 2200, 'ptt': 150, 'basos': 8,  'alp': 4000, 'ast': 22000, 'alt': 11000,
+                           'troponin_t': 24, 'cpk_mb': 700, 'cpk': 10000,  'pt': 150, 'mch': 46, 'mchc': 43,
+                           'mcv': 140, 'rbc': 8, 'rdw': 38, 'amylase': 2800, 'crp': 4000, 'urineoutput': 2445,
+                           'weight': 550, 'urine_prot': 7500, 'cvp': 400, 'peep': 30, 'bilirubin': 66, 'BUN': 300,
+                           'creatinine':66, 'glucose': 2200, 'hematocrit': 100, 'INR': 15, 'lactate': 33, 'potassium': 15,
+                           'sodium': 250, 'wbc': 1100, 'albumin': 60, 'urine_creat': 650, 'magnesium': 22, 'phosphate': 22,
+                           'wbc_urine': 750}
 
-    for var_to_remove in range_dict_high:
-        remove_outliers_h(vital, X_mean, var_to_remove, range_dict_high[var_to_remove])
-    for var_to_remove in range_dict_low:
-        remove_outliers_l(vital, X_mean, var_to_remove, range_dict_low[var_to_remove])
+        range_dict_low = {'pH': 6.3, 'baseexcess': -100}
+        for var_to_remove in range_dict_high:
+            remove_outliers_h(vital, X_mean, var_to_remove, range_dict_high[var_to_remove])
+        for var_to_remove in range_dict_low:
+            remove_outliers_l(vital, X_mean, var_to_remove, range_dict_low[var_to_remove])
+    else:
+        print('Skipped outlier removal')
+    del X_mean
+
+    if args.exit_point == 'Outlier_removal':
+        print('Exit point is after removing outliers, saving results...')
+        intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_inv.h5'), key='eicu_inv')
+        static.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_static.h5'), key='eicu_static')
+        vital.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_vital.h5'), key='eicu_vital')
+        return
 
     # read_mimic col means col stds
-    mimic_mean_std = pd.read_hdf(os.path.join('./Extract', 'MEEP_stats_0702.h5'), key='vital_mean_std')
-    del X_mean
+    print('Start normalization and data imputation ')
     # normalize
     count_col = [i for i in total_cols if 'count' in i]
-    # fix fio2 column by x100
-    vital.loc[:, [('fio2', 'mean')]] = vital.loc[:, [('fio2', 'mean')]] * 100
+    # # fix fio2 column by x100
+    # vital.loc[:, [('fio2', 'mean')]] = vital.loc[:, [('fio2', 'mean')]] * 100
     # col_means, col_stds = vital.loc[:, mean_col].mean(axis=0), vital.loc[:, mean_col].std(axis=0)
     # first use mimic mean to normorlize
-    col_means, col_stds = mimic_mean_std.loc[:, 'mean'], mimic_mean_std.loc[:, 'std']
-    col_means.index = mean_col
-    col_stds.index = mean_col
+    if args.norm_eicu == 'MIMIC':
+        mimic_mean_std = pd.read_hdf(os.path.join('./Extract', 'MEEP_stats_0702.h5'), key='vital_mean_std')
+        col_means, col_stds = mimic_mean_std.loc[:, 'mean'], mimic_mean_std.loc[:, 'std']
+        col_means.index = mean_col
+        col_stds.index = mean_col
+    else:
+        col_means, col_stds = vital.loc[:, mean_col].mean(axis=0), vital.loc[:, mean_col].std(axis=0)
     vital.loc[:, mean_col] = (vital.loc[:, mean_col] - col_means) / col_stds
     icustay_means = vital.loc[:, mean_col].groupby(ID_COLS).mean()
     # impute
@@ -2490,6 +2531,13 @@ def extract_eicu(args):
     vital.loc[:, count_col] = (vital.loc[:, count_col] > 0).astype(float)
     # at this satge only 3 last columns has nan values
     vital = vital.fillna(0)
+
+    if args.exit_point == 'Impute':
+        print('Exit point is after data imputation, saving results...')
+        intervention.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_inv.h5'), key='eicu_inv')
+        static.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_static.h5'), key='eicu_static')
+        vital.to_hdf(os.path.join(args.output_dir, 'MEEP_eICU_vital.h5'), key='eicu_vital')
+        return
 
     # split data
     stays_v = set(vital.index.get_level_values(0).values)
@@ -2511,6 +2559,7 @@ def extract_eicu(args):
         for df in (vital, intervention, static)]
 
     if args.exit_point == 'All':
+        print('Exit point is after all steps, including train-val-test splitting, saving results...')
         vital_train.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_train')
         vital_dev.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_dev')
         vital_test.to_hdf('./Extract/MEEP/eICU_split_1.hdf5', key='vital_test')
