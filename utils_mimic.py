@@ -218,12 +218,13 @@ def remove_outliers_l(X, X_or, col, range):
     return
 
 def fill_query(df, fill_df, time='chartoffset'):
+
     df['hours_in'] = df[time].floordiv(60)
     df.drop(columns=[time], inplace=True)
-    df.set_index(ID_COLS + ['hours_in'], inplace=True)
+    df.set_index(['patientunitstayid']+ ['hours_in'], inplace=True)
     df.reset_index(inplace=True)
     # level_to_change = 1
-    df = df.groupby(ID_COLS + ['hours_in']).agg(['mean', 'count'])
+    df = df.groupby(['patientunitstayid'] + ['hours_in']).agg(['mean', 'count'])
     # df.index = df.index.set_levels(df.index.levels[level_to_change].astype(int), level=level_to_change)
     df = df.reindex(fill_df.index)
     return df
