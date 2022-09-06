@@ -1315,6 +1315,7 @@ def extract_eicu(args):
     and labresultoffset >=0
     group by patientunitstayid, labresultoffset
     order by patientunitstayid, labresultoffset
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     bg = gcp2df(query)
     bg = fill_query(bg, fill_df)
@@ -1490,6 +1491,7 @@ def extract_eicu(args):
     and labresultoffset >=0 
     group by patientunitstayid, labresultoffset
     order by patientunitstayid, labresultoffset
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     lab = gcp2df(query)
     lab = fill_query(lab, fill_df)
@@ -1636,6 +1638,7 @@ def extract_eicu(args):
     AND nursingchartoffset >=0 
     group by patientunitstayid, nursingchartoffset, nursingchartentryoffset
     order by patientunitstayid, nursingchartoffset, nursingchartentryoffset
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     vital = gcp2df(query)
 
@@ -1673,6 +1676,7 @@ def extract_eicu(args):
     FROM physionet-data.eicu_crd.microlab ml
     WHERE ml.patientunitstayid in ({icuids})
     AND ml.culturetakenoffset >=0
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     microlab = gcp2df(query)
 
@@ -1687,6 +1691,7 @@ def extract_eicu(args):
     FROM physionet-data.eicu_crd_derived.pivoted_gcs gc
     WHERE gc.patientunitstayid in ({icuids})
     and gc.chartoffset >=0
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     gcs = gcp2df(query)
     gcs = fill_query(gcs, fill_df)
@@ -1697,6 +1702,7 @@ def extract_eicu(args):
     FROM physionet-data.eicu_crd_derived.pivoted_uo uo
     WHERE uo.patientunitstayid in ({icuids})
     and uo.chartoffset >=0
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     uo = gcp2df(query)
     uo = fill_query(uo, fill_df)
@@ -1707,6 +1713,7 @@ def extract_eicu(args):
     FROM physionet-data.eicu_crd_derived.pivoted_weight wg
     WHERE wg.patientunitstayid in ({icuids})
     and wg.chartoffset >=0
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     weight = gcp2df(query)
     weight = fill_query(weight, fill_df)
@@ -1717,6 +1724,7 @@ def extract_eicu(args):
     FROM physionet-data.eicu_crd.vitalperiodic vp
     WHERE vp.patientunitstayid in ({icuids})
     and vp.observationoffset >=0
+    LIMIT 1000
     """.format(icuids=','.join(icuids_to_keep))
     cvp = gcp2df(query)
     cvp = fill_query(cvp, fill_df, time='observationoffset')
@@ -1785,6 +1793,7 @@ def extract_eicu(args):
     and labresultoffset >=0
     group by patientunitstayid, labresultoffset
     order by patientunitstayid, labresultoffset
+    limit 1000
     """.format(icuids=','.join(icuids_to_keep))
     labmakeup = gcp2df(query)
     labmakeup = fill_query(labmakeup, fill_df)
@@ -1796,6 +1805,7 @@ def extract_eicu(args):
     WHERE rc.respchartvaluelabel = 'Tidal Volume Observed (VT)'
     AND patientunitstayid in ({icuids})
     AND respchartoffset >=0
+    limit 1000
     """.format(icuids=','.join(icuids_to_keep))
     tidal_vol_obs = gcp2df(query)
     tidal_vol_obs = fill_query(tidal_vol_obs, fill_df)
@@ -1914,6 +1924,7 @@ def extract_eicu(args):
         WHERE  vt.priorventstartoffset is not null 
         AND vt.priorventendoffset is not null
         AND vt.patientunitstayid in ({icuids})
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     vent = gcp2df(query)
 
@@ -1962,6 +1973,7 @@ def extract_eicu(args):
             AND pm.patientunitstayid in ({icuids}) 
             AND pm.drugorderoffset is not null 
             AND pm.drugstopoffset is not null
+            LIMIT 1000
             """.format(drug_name=c, icuids=','.join(icuids_to_keep))
         med = gcp2df(query)
         # 'epinephrine',  'dopamine', 'norepinephrine', 'phenylephrine', \
@@ -2140,6 +2152,7 @@ def extract_eicu(args):
         AND md.patientunitstayid in ({icuids}) 
         AND md.drugstartoffset is not null 
         AND md.drugstopoffset is not null
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
 
     anti = gcp2df(query)
@@ -2162,6 +2175,7 @@ def extract_eicu(args):
         WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*crrt.*$")
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     crrt = gcp2df(query)
 
@@ -2184,6 +2198,7 @@ def extract_eicu(args):
         OR REGEXP_CONTAINS(lower(cellpath), r"^.*red blood cell.*$"))
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     rbc = gcp2df(query)
 
@@ -2206,6 +2221,7 @@ def extract_eicu(args):
         OR REGEXP_CONTAINS(lower(cellpath), r"^.*ffp.*$"))
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     ffp = gcp2df(query)
     ffp = process_inv(ffp, 'ffp')
@@ -2226,6 +2242,7 @@ def extract_eicu(args):
         WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*platelet.*$")
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     platelets = gcp2df(query)
 
@@ -2247,6 +2264,7 @@ def extract_eicu(args):
         WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*colloid.*$")
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     colloid = gcp2df(query)
     colloid = process_inv(colloid, 'colloid')
@@ -2266,6 +2284,7 @@ def extract_eicu(args):
         WHERE REGEXP_CONTAINS(lower(cellpath), r"^.*crystalloid.*$")
         AND io.patientunitstayid in ({icuids}) 
         GROUP BY io.patientunitstayid
+        LIMIT 1000
         """.format(icuids=','.join(icuids_to_keep))
     crystalloid = gcp2df(query)
     crystalloid = process_inv(crystalloid, 'crystalloid')
