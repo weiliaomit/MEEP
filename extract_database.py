@@ -1228,7 +1228,8 @@ def extract_eicu(args):
 
     print("Patient icu info query done, start querying variables in Dynamic table")
     patient['unitadmitoffset'] = 0
-    patient = patient.loc[~patient.loc[:, 'age'].isin(args.age_min)]
+    young_age = [str(i) for i in range(args.age_min)]
+    patient = patient.loc[~patient.loc[:, 'age'].isin(young_age)]
     icuids_to_keep = patient['patientunitstayid']
     icuids_to_keep = set([str(s) for s in icuids_to_keep])
     patient.set_index('patientunitstayid', inplace=True)
