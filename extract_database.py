@@ -795,9 +795,9 @@ def extract_mimic(args):
         ORDER BY stay_id
         """.format(ids=','.join(icuids_to_keep))
     platelets_trans = gcp2df(query)
-    platelets_trans = compile_intervention(platelets_trans, 'platelats_trans')
+    platelets_trans = compile_intervention(platelets_trans, 'platelets_trans')
     intervention = intervention.merge(
-        platelets_trans[['subject_id', 'hadm_id', 'stay_id', 'hours_in', 'platelats_trans']],
+        platelets_trans[['subject_id', 'hadm_id', 'stay_id', 'hours_in', 'platelets_trans']],
         on=['subject_id', 'hadm_id', 'stay_id', 'hours_in'],
         how='left'
     )
