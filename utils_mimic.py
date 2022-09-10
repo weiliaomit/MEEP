@@ -229,8 +229,8 @@ def remove_outliers_l(X, X_or, col, range):
     :param range: int, the threshold value
     :return: None,
     """
-    X.loc[:, [(col, 'mean')]] = X.loc[:, [(col, 'mean')]].mask((X_or.loc[:, [(col, 'mean')]] < range).values)
-    X.loc[:, [(col, 'count')]] = X.loc[:, [(col, 'count')]].mask((X_or.loc[:, [(col, 'mean')]] < range).values, other=0.0)
+    X.loc[:, [(col, 'mean')]] = X.loc[:, [(col, 'mean')]].mask((X_or.loc[:, [(col, 'mean')]] <= range).values)
+    X.loc[:, [(col, 'count')]] = X.loc[:, [(col, 'count')]].mask((X_or.loc[:, [(col, 'mean')]] <= range).values, other=0.0)
     return
 
 def fill_query(df, fill_df, time='chartoffset'):

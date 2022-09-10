@@ -222,8 +222,59 @@ def extract_mimic(args):
 
     # query vital sign
     query = """
+    With vitalsign as 
+    (
+      select
+        ce.subject_id
+      , ce.stay_id
+      , ce.charttime
+      , AVG(case when itemid in (220045) and valuenum > 0 and valuenum < 9999 then valuenum else null end) as heart_rate
+      , AVG(case when itemid in (220179,220050) and valuenum > 0 and valuenum < 9999 then valuenum else null end) as sbp
+      , AVG(case when itemid in (220180,220051) and valuenum > 0 and valuenum < 9999 then valuenum else null end) as dbp
+      , AVG(case when itemid in (220052,220181,225312) and valuenum > 0 and valuenum < 9999 then valuenum else null end) as mbp
+      , AVG(case when itemid = 220179 and valuenum > 0 and valuenum < 9999 then valuenum else null end) as sbp_ni
+      , AVG(case when itemid = 220180 and valuenum > 0 and valuenum < 9999 then valuenum else null end) as dbp_ni
+      , AVG(case when itemid = 220181 and valuenum > 0 and valuenum < 9999 then valuenum else null end) as mbp_ni
+      , AVG(case when itemid in (220210,224690) and valuenum > 0 and valuenum < 9999 then valuenum else null end) as resp_rate
+      , ROUND(
+          AVG(case when itemid in (223761) and valuenum > 70 and valuenum < 120 then (valuenum-32)/1.8 -- converted to degC in valuenum call
+                  when itemid in (223762) and valuenum > 10 and valuenum < 50  then valuenum else null end)
+        , 2) as temperature
+      , MAX(CASE WHEN itemid = 224642 THEN value ELSE NULL END) AS temperature_site
+      , AVG(case when itemid in (220277) and valuenum > 0 and valuenum <= 100 then valuenum else null end) as spo2
+      , AVG(case when itemid in (225664,220621,226537) and valuenum > 0 then valuenum else null end) as glucose
+      FROM  physionet-data.mimic_icu.chartevents ce
+      where ce.stay_id IS NOT NULL
+      and ce.itemid in
+      (
+        220045, -- Heart Rate
+        225309, -- ART BP Systolic
+        225310, -- ART BP Diastolic
+        225312, -- ART BP Mean
+        220050, -- Arterial Blood Pressure systolic
+        220051, -- Arterial Blood Pressure diastolic
+        220052, -- Arterial Blood Pressure mean
+        220179, -- Non Invasive Blood Pressure systolic
+        220180, -- Non Invasive Blood Pressure diastolic
+        220181, -- Non Invasive Blood Pressure mean
+        220210, -- Respiratory Rate
+        224690, -- Respiratory Rate (Total)
+        220277, -- SPO2, peripheral
+        -- GLUCOSE, both lab and fingerstick
+        225664, -- Glucose finger stick
+        220621, -- Glucose (serum)
+        226537, -- Glucose (whole blood)
+        -- TEMPERATURE
+        223762, -- "Temperature Celsius"
+        223761,  -- "Temperature Fahrenheit"
+        224642 -- Temperature Site
+        -- 226329 -- Blood Temperature CCO (C)
+      )
+      group by ce.subject_id, ce.stay_id, ce.charttime
+    )
+    
     SELECT b.*, i.hadm_id, i.icu_intime
-    FROM physionet-data.mimic_derived.vitalsign b
+    FROM vitalsign b 
     INNER JOIN physionet-data.mimic_derived.icustay_detail i ON b.stay_id = i.stay_id
     where b.stay_id in ({icuids})
     and b.charttime between i.icu_intime and i.icu_outtime
@@ -271,8 +322,56 @@ def extract_mimic(args):
 
     # query chemistry
     query = """
+    With chem as 
+    (
+      SELECT 
+        MAX(subject_id) AS subject_id
+        , MAX(hadm_id) AS hadm_id
+        , MAX(charttime) AS charttime
+        , le.specimen_id
+        -- convert from itemid into a meaningful column
+        , MAX(CASE WHEN itemid = 50862 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS albumin
+        , MAX(CASE WHEN itemid = 50930 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS globulin
+        , MAX(CASE WHEN itemid = 50976 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS total_protein
+        , MAX(CASE WHEN itemid = 50868 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS aniongap
+        , MAX(CASE WHEN itemid = 50882 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS bicarbonate
+        , MAX(CASE WHEN itemid = 51006 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS bun
+        , MAX(CASE WHEN itemid = 50893 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS calcium
+        , MAX(CASE WHEN itemid = 50902 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS chloride
+        , MAX(CASE WHEN itemid = 50912 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS creatinine
+        , MAX(CASE WHEN itemid = 50931 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS glucose
+        , MAX(CASE WHEN itemid = 50983 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS sodium
+        , MAX(CASE WHEN itemid = 50971 AND valuenum <=  9999 THEN valuenum ELSE NULL END) AS potassium
+        FROM physionet-data.mimic_hosp.labevents le
+        WHERE le.itemid IN(
+        -- comment is: LABEL | CATEGORY | FLUID | NUMBER OF ROWS IN LABEVENTS
+        50862, -- ALBUMIN | CHEMISTRY | BLOOD | 146697
+        50930, -- Globulin
+        50976, -- Total protein
+        50868, -- ANION GAP | CHEMISTRY | BLOOD | 769895
+        -- 52456, -- Anion gap, point of care test
+        50882, -- BICARBONATE | CHEMISTRY | BLOOD | 780733
+        50893, -- Calcium
+        50912, -- CREATININE | CHEMISTRY | BLOOD | 797476
+        -- 52502, Creatinine, point of care
+        50902, -- CHLORIDE | CHEMISTRY | BLOOD | 795568
+        50931, -- GLUCOSE | CHEMISTRY | BLOOD | 748981
+        -- 52525, Glucose, point of care
+        50971, -- POTASSIUM | CHEMISTRY | BLOOD | 845825
+        -- 52566, -- Potassium, point of care
+        50983, -- SODIUM | CHEMISTRY | BLOOD | 808489
+        -- 52579, -- Sodium, point of care
+        51006  -- UREA NITROGEN | CHEMISTRY | BLOOD | 791925
+        -- 52603, Urea, point of care 
+        )
+        AND valuenum IS NOT NULL
+      -- lab values cannot be 0 and cannot be negative
+      -- .. except anion gap.
+        AND (valuenum > 0 OR itemid = 50868)
+      GROUP BY le.specimen_id
+    )
     SELECT b.*, i.stay_id, i.icu_intime
-    FROM physionet-data.mimic_derived.chemistry b
+    FROM chem b
     INNER JOIN physionet-data.mimic_derived.icustay_detail i ON i.subject_id = b.subject_id
     where b.subject_id in ({icuids})
     and b.charttime between i.icu_intime and i.icu_outtime
@@ -1022,17 +1121,22 @@ def extract_mimic(args):
     if not args.no_removal:
         print('Performing outlier removal')
         range_dict_high = {'so2': 100, 'po2': 770, 'pco2': 220, 'ph': 10, 'baseexcess': 100, 'bicarbonate': 66,
-                           'chloride': 200, 'hemoglobin': 30, 'hematocrit': 100, 'calcium': 1.87, 'temperature': 47,
-                           'potassium': 15, 'sodium': 250, 'lactate': 33, 'glucose': 2200, 'heart_rate': 390, 'sbp': 375,
-                           'sbp_ni': 375, 'mbp': 375, 'mbp_ni': 375, 'dbp': 375, 'dbp_ni': 375, 'resp_rate': 330,
-                           'wbc': 1100, 'atypical_lymphocytes': 17, 'bun': 300, 'calcium_chem': 28, 'fibrinogen': 1709,
-                           'Phosphate': 22, 'Positive end-expiratory pressure': 30, 'ck_cpk': 10000, 'ggt': 10000,
-                           'Peak inspiratory pressure': 40, 'Magnesium': 22, 'Plateau Pressure': 61, 'Tidal Volume Observed': 2000,
-                           'nrbc': 143, 'inr': 15, 'pt': 150, 'mch': 46, 'mchc': 43, 'troponin_t': 24, 'albumin': 60, 'aniongap': 55,
-                           'creatinine': 66, 'platelet': 2200, 'alt': 11000, 'ast': 22000, 'alp': 4000, 'ld_ldh': 35000,
-                           'bilirubin_total': 66, 'bilirubin_indirect': 66, 'bilirubin_direct': 66, 'weight': 550, 'uo': 2445,
-                           'Central Venous Pressure': 400}
-        range_dict_low = {'ph': 6.3, 'baseexcess': -100, 'temperature': 14.2, 'lactate': 0.01, 'uo': 0, 'pH urine': 3}
+                           'totalco2': 88, 'chloride': 200, 'hemoglobin': 30, 'hematocrit': 100, 'calcium': 1.87,
+                           'temperature': 47, 'potassium': 15, 'sodium': 250, 'lactate': 33, 'glucose': 2200,
+                           'heart_rate': 390, 'sbp': 375, 'sbp_ni': 375, 'mbp': 375, 'mbp_ni': 375, 'dbp': 375, 'dbp_ni': 375,
+                           'resp_rate': 330, 'wbc': 1100, 'basophils': 8, 'atypical_lymphocytes': 17, 'nrbc': 143, 'troponin_t': 24,
+                           'ck_mb': 700,  'albumin': 60, 'total_protein': 20,  'aniongap': 55,  'bun': 300, 'calcium_chem': 28,
+                           'creatinine': 66, 'fibrinogen': 1700, 'inr': 15, 'pt': 150, 'ptt':500, 'mch': 46, 'mchc': 43, 'mcv': 140,
+                           'platelet': 2200, 'rbc': 8, 'rdw': 38, 'alt': 11000, 'ast': 22000, 'alp': 4000, 'amylase': 2800,
+                           'bilirubin_total': 66, 'bilirubin_indirect': 66, 'bilirubin_direct': 66,  'ck_cpk': 10000, 'ggt': 10000,
+                           'ld_ldh': 35000, 'crp': 4000, 'weight': 550, 'uo': 2445, 'Central Venous Pressure': 400,
+                           'Creatinine urine': 650, 'Magnesium': 22, 'Peak inspiratory pressure': 40,   'Phosphate': 22,
+                           'Plateau Pressure': 61, 'Positive end-expiratory pressure': 30, 'Tidal Volume Observed': 2000,
+                           'Total Protein Urine': 7500, 'White blood cell count urine': 750, 'pH urine': 10
+                           }
+        range_dict_low = {'ph': 6.3, 'baseexcess': -100, 'temperature': 14.2, 'lactate': 0.01, 'uo': 0, 'pH urine': 3,
+                          'basophils': 0, 'eosinophils': 0, 'lymphocytes': 0, 'monocytes': 0, 'neutrophils': 0, 'bands': 0
+                          }
 
         for var_to_remove in range_dict_high:
             remove_outliers_h(vital_final, X_mean, var_to_remove, range_dict_high[var_to_remove])
@@ -1713,7 +1817,7 @@ def extract_eicu(args):
 
     # weight cvp
     query = """
-    SELECT vp.patientunitstayid, vp.observationoffset, vp.cvp
+    SELECT vp.patientunitstayid, vp.observationoffset, CAST(vp.cvp*0.736 AS INT64) as cvp
     FROM physionet-data.eicu_crd.vitalperiodic vp
     WHERE vp.patientunitstayid in ({icuids})
     and vp.observationoffset >=0
@@ -1738,7 +1842,7 @@ def extract_eicu(args):
         , labresultrevisedoffset
       from physionet-data.eicu_crd.lab
       where labname in
-      ('urinary creatinine', 'magnesium',  'phosphate', "WBC's in urine", '24 h urine protein'
+      ('urinary creatinine', 'magnesium',  'phosphate', "WBC's in urine"
       )
       group by patientunitstayid, labname, labresultoffset, labresultrevisedoffset
       having count(distinct labresult)<=1
@@ -1769,7 +1873,6 @@ def extract_eicu(args):
         OR (lab.labname = 'magnesium' and lab.labresult > 0)
         OR (lab.labname = 'phosphate' and lab.labresult > 0)
         OR (lab.labname = "WBC's in urine" and lab.labresult > 0) -- based on mimic
-        OR (lab.labname = '24 h urine protein'and lab.labresult > 0) -- no need 
     )
     select
         patientunitstayid
@@ -1778,7 +1881,6 @@ def extract_eicu(args):
       , MAX(case when labname = 'magnesium' then labresult else null end) as magnesium
       , MAX(case when labname = 'phosphate' then labresult else null end) as phosphate
       , MAX(case when labname = "WBC's in urine" then labresult else null end) as wbc_urine
-      , MAX(case when labname = '24 h urine protein' then labresult else null end) as urine_prot
     from vw1
     where rn = 1
     and patientunitstayid in ({icuids})
@@ -1835,7 +1937,7 @@ def extract_eicu(args):
     columns_to_make = ['calcium_0', 'atypical_lymphocytes', 'immature_granulocytes', 'metamyelocytes', 'nrbc',
                        'ntprobnp', 'bilirubin_direct', 'bilirubin_indirect', 'ggt', 'ld_ldh',
                        'Peak inspiratory pressure', 'Plateau Pressure',
-                       'Positive end-expiratory pressure Set', 'Red blood cell count urine', 'pH urine']
+                       'Positive end-expiratory pressure Set', 'Red blood cell count urine', 'pH urine', 'urine_prot']
     for col in columns_to_make:
         vital[(col, 'mean')] = fill_df.values
         vital[(col, 'count')] = 0
@@ -2470,7 +2572,7 @@ def extract_eicu(args):
                            'weight': 550, 'urine_prot': 7500, 'cvp': 400, 'peep': 30, 'bilirubin': 66, 'BUN': 300,
                            'creatinine':66, 'glucose': 2200, 'hematocrit': 100, 'INR': 15, 'lactate': 33, 'potassium': 15,
                            'sodium': 250, 'wbc': 1100, 'albumin': 60, 'urine_creat': 650, 'magnesium': 22, 'phosphate': 22,
-                           'wbc_urine': 750}
+                           'wbc_urine': 750, 'total_protein': 20}
 
         range_dict_low = {'pH': 6.3, 'baseexcess': -100}
         for var_to_remove in range_dict_high:
