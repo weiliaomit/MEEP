@@ -1121,7 +1121,7 @@ def extract_mimic(args):
     if not args.no_removal:
         print('Performing outlier removal')
         range_dict_high = {'so2': 100, 'po2': 770, 'pco2': 220, 'ph': 10, 'baseexcess': 100, 'bicarbonate': 66,
-                           'totalco2': 88, 'chloride': 200, 'hemoglobin': 30, 'hematocrit': 100, 'calcium': 1.87,
+                           'totalco2': 80, 'chloride': 200, 'hemoglobin': 30, 'hematocrit': 100, 'calcium': 1.87,
                            'temperature': 47, 'potassium': 15, 'sodium': 250, 'lactate': 33, 'glucose': 2200,
                            'heart_rate': 390, 'sbp': 375, 'sbp_ni': 375, 'mbp': 375, 'mbp_ni': 375, 'dbp': 375, 'dbp_ni': 375,
                            'resp_rate': 330, 'wbc': 1100, 'basophils': 8, 'atypical_lymphocytes': 17, 'nrbc': 143, 'troponin_t': 24,
@@ -1713,17 +1713,17 @@ def extract_eicu(args):
       patientunitstayid
     , nursingchartoffset as chartoffset
     , nursingchartentryoffset as entryoffset
-    , avg(case when heartrate > 0 and heartrate <= 390 then heartrate else null end) as heartrate
-    , avg(case when RespiratoryRate >= 0 and RespiratoryRate <= 330 then RespiratoryRate else null end) as RespiratoryRate
+    , avg(case when heartrate > 0 and heartrate <= 9999 then heartrate else null end) as heartrate
+    , avg(case when RespiratoryRate >= 0 and RespiratoryRate <= 9999 then RespiratoryRate else null end) as RespiratoryRate
     , avg(case when o2saturation >= 0 and o2saturation <= 100 then o2saturation else null end) as spo2
-    , avg(case when nibp_systolic > 0 and nibp_systolic <= 375 then nibp_systolic else null end) as nibp_systolic
-    , avg(case when nibp_diastolic > 0 and nibp_diastolic <= 375 then nibp_diastolic else null end) as nibp_diastolic
-    , avg(case when nibp_mean > 0 and nibp_mean <= 375 then nibp_mean else null end) as nibp_mean
+    , avg(case when nibp_systolic > 0 and nibp_systolic <= 9999 then nibp_systolic else null end) as nibp_systolic
+    , avg(case when nibp_diastolic > 0 and nibp_diastolic <= 9999 then nibp_diastolic else null end) as nibp_diastolic
+    , avg(case when nibp_mean > 0 and nibp_mean <= 9999 then nibp_mean else null end) as nibp_mean
     , avg(case when temperature >= 14.2 and temperature <= 47 then temperature else null end) as temperature
     --, max(temperaturelocation) as temperaturelocation
-    , avg(case when ibp_systolic > 0 and ibp_systolic <= 375 then ibp_systolic else null end) as ibp_systolic
-    , avg(case when ibp_diastolic > 0 and ibp_diastolic <= 375 then ibp_diastolic else null end) as ibp_diastolic
-    , avg(case when ibp_mean > 0 and ibp_mean <= 375 then ibp_mean else null end) as ibp_mean
+    , avg(case when ibp_systolic > 0 and ibp_systolic <= 9999 then ibp_systolic else null end) as ibp_systolic
+    , avg(case when ibp_diastolic > 0 and ibp_diastolic <= 9999 then ibp_diastolic else null end) as ibp_diastolic
+    , avg(case when ibp_mean > 0 and ibp_mean <= 9999 then ibp_mean else null end) as ibp_mean
     from nc
     WHERE (heartrate IS NOT NULL
     OR RespiratoryRate IS NOT NULL
@@ -2564,17 +2564,18 @@ def extract_eicu(args):
 
     if not args.no_removal:
         print('Performing outlier removal')
-        range_dict_high = {'pao2':770, 'paco2': 220, 'pH': 10, 'aniongap': 55, 'baseexcess': 100,
-                           'calcium': 28,  'chloride': 200, 'bicarbonate': 66, 'TotalCO2': 80, 'hemoglobin': 30,
-                           'platelets': 2200, 'ptt': 150, 'basos': 8,  'alp': 4000, 'ast': 22000, 'alt': 11000,
-                           'troponin_t': 24, 'cpk_mb': 700, 'cpk': 10000,  'pt': 150, 'mch': 46, 'mchc': 43,
-                           'mcv': 140, 'rbc': 8, 'rdw': 38, 'amylase': 2800, 'crp': 4000, 'urineoutput': 2445,
-                           'weight': 550, 'urine_prot': 7500, 'cvp': 400, 'peep': 30, 'bilirubin': 66, 'BUN': 300,
-                           'creatinine':66, 'glucose': 2200, 'hematocrit': 100, 'INR': 15, 'lactate': 33, 'potassium': 15,
-                           'sodium': 250, 'wbc': 1100, 'albumin': 60, 'urine_creat': 650, 'magnesium': 22, 'phosphate': 22,
-                           'wbc_urine': 750, 'total_protein': 20}
-
-        range_dict_low = {'pH': 6.3, 'baseexcess': -100}
+        range_dict_high = {'spo2': 100, 'pao2': 770, 'paco2': 220, 'pH': 10, 'baseexcess': 100, 'bicarbonate': 66,
+                           'TotalCO2': 80,  'chloride': 200,   'hemoglobin': 30, 'hematocrit': 100,
+                           'temperature': 47, 'potassium': 15, 'sodium': 250, 'lactate': 33, 'glucose': 2200,
+                           'heartrate': 390,  'ibp_systolic': 375, 'ibp_diastolic': 375, 'ibp_mean': 375, 'nibp_systolic': 375,
+                           'nibp_diastolic': 375, 'nibp_mean': 375, 'RespiratoryRate': 330, 'wbc': 1100, 'basos': 8, 'troponin_t': 24,
+                           'cpk_mb': 700,  'albumin': 60, 'total_protein': 20, 'aniongap': 55, 'BUN': 300, 'calcium': 28,
+                           'creatinine': 66, 'fibrinogen': 1700,  'INR': 15, 'pt': 150, 'ptt': 500, 'mch': 46, 'mchc': 43,'mcv': 140,
+                           'platelets': 2200, 'rbc': 8, 'rdw': 38,  'alt': 11000, 'alp': 4000, 'ast': 22000, 'amylase': 2800,
+                           'bilirubin': 66,  'cpk': 10000, 'crp': 4000, 'weight': 550, 'urineoutput': 2445, 'cvp': 400,
+                           'urine_creat': 650, 'magnesium': 22, 'phosphate': 22, 'peep': 30, 'tidal_vol_obs': 2000, 'wbc_urine': 750,
+                           'pH urine': 10}
+        range_dict_low = {'pH': 6.3, 'temperature': 14.2, 'baseexcess': -100, 'pH urine': 3}
         for var_to_remove in range_dict_high:
             remove_outliers_h(vital, X_mean, var_to_remove, range_dict_high[var_to_remove])
         for var_to_remove in range_dict_low:
